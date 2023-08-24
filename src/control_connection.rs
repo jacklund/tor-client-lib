@@ -24,8 +24,8 @@ pub struct OnionService {
 
 #[derive(Debug)]
 pub struct ControlResponse {
-    status_code: u16,
-    reply: String,
+    pub status_code: u16,
+    pub reply: String,
 }
 
 impl ControlResponse {

@@ -11,10 +11,13 @@ base32 = "0.4.0"
 base64 = "0.21.2"
 ed25519-dalek = { version = "2.0.0", features = ["pkcs8", "serde", "signature", "pem"] }
 futures = "0.3.28"
+hmac = "0.12.1"
 lazy_static = "1.4.0"
 log = "0.4.20"
+rand = "0.8.5"
 regex = "1.9.3"
 rsa = "0.9.2"
+sha2 = "0.10.7"
 tokio = { version = "1.31.0", features = ["io-std", "net", "io-util", "macros", "parking_lot", "test-util"] }
 tokio-socks = "0.5.1"
 tokio-util = { version = "0.7.8", features = ["codec"] }
