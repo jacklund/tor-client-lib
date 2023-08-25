@@ -5,8 +5,8 @@ use crate::{
 };
 use futures::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
-use log::debug;
-use regex::Regex;
+use log::info;
+use regex::{Captures, Regex};
 use tokio::{
     io::{ReadHalf, WriteHalf},
     net::{TcpStream, ToSocketAddrs},
@@ -37,6 +37,17 @@ impl ControlResponse {
     }
 }
 
+fn parse_status_code(code_str: &str) -> Result<u16, TorError> {
+    match code_str.parse::<u16>() {
+        Ok(status_code) => Ok(status_code),
+        Err(error) => Err(TorError::protocol_error(&format!(
+            "Error parsing response status code: {}",
+            error
+        ))),
+    }
+}
+
+/// Read a response to a controller command
 async fn read_control_response<S: StreamExt<Item = Result<String, LinesCodecError>> + Unpin>(
     reader: &mut S,
 ) -> Result<ControlResponse, TorError> {
@@ -55,10 +66,11 @@ async fn read_control_response<S: StreamExt<Item = Result<String, LinesCodecErro
     let mut control_response = ControlResponse::new();
     loop {
         let mut line = read_line(reader).await?;
+        info!("<= {}", line);
         match MID_REGEX.captures(&line) {
             // Read Mid replies line-by-line, and append their reply lines to the reply
             Some(captures) => {
-                control_response.status_code = captures["code"].parse::<u16>().unwrap();
+                control_response.status_code = parse_status_code(&captures["code"])?;
                 control_response
                     .reply
                     .push_str(&format!("{}\n", &captures["reply_line"]));
@@ -66,7 +78,7 @@ async fn read_control_response<S: StreamExt<Item = Result<String, LinesCodecErro
             None => match DATA_REGEX.captures(&line.clone()) {
                 // For Data replies, append everything between the initial line and the "." to the reply line
                 Some(captures) => {
-                    control_response.status_code = captures["code"].parse::<u16>().unwrap();
+                    control_response.status_code = parse_status_code(&captures["code"])?;
                     let mut reply_line = captures["reply_line"].to_string();
                     reply_line.push('\n');
                     loop {
@@ -82,7 +94,7 @@ async fn read_control_response<S: StreamExt<Item = Result<String, LinesCodecErro
                 }
                 None => match END_REGEX.captures(&line) {
                     Some(captures) => {
-                        control_response.status_code = captures["code"].parse::<u16>().unwrap();
+                        control_response.status_code = parse_status_code(&captures["code"])?;
                         // If we haven't gotten any other replies, use this one as the message
                         if control_response.reply.is_empty() {
                             control_response.reply.push_str(&captures["reply_line"]);
@@ -101,7 +113,8 @@ async fn read_control_response<S: StreamExt<Item = Result<String, LinesCodecErro
     }
 }
 
-pub(crate) async fn read_line<S: StreamExt<Item = Result<String, LinesCodecError>> + Unpin>(
+/// Read a response line
+async fn read_line<S: StreamExt<Item = Result<String, LinesCodecError>> + Unpin>(
     reader: &mut S,
 ) -> Result<String, TorError> {
     match reader.next().await {
@@ -111,6 +124,7 @@ pub(crate) async fn read_line<S: StreamExt<Item = Result<String, LinesCodecError
     }
 }
 
+/// Format the ADD_ONION request arguments
 fn format_onion_service_request_string(
     key_type: &str,
     key_blob: &str,
@@ -125,13 +139,33 @@ fn format_onion_service_request_string(
     )
 }
 
-#[derive(Clone, Debug)]
-pub struct ProtocolInfo {
-    auth_methods: Vec<String>,
-    cookie_file: Option<String>,
-    tor_version: String,
+/// Parse a response field that is required, i.e., throw an error if it's not there
+fn parse_required_response_field<'a>(
+    captures: &Captures<'a>,
+    field_name: &str,
+    field_arg: &str,
+    response_type: &str,
+) -> Result<&'a str, TorError> {
+    match captures.name(field_name) {
+        Some(field) => Ok(field.as_str()),
+        None => Err(TorError::protocol_error(&format!(
+            "'{}' field not found in {} response",
+            field_arg, response_type,
+        ))),
+    }
 }
 
+/// ProtocolInfo struct, contains information from the response to the
+/// PROTOCOLINFO command
+#[derive(Clone, Debug)]
+pub struct ProtocolInfo {
+    pub auth_methods: Vec<String>,
+    pub cookie_file: Option<String>,
+    pub tor_version: String,
+}
+
+/// Control connection, used to send commands to and receive responses from
+/// the Tor server
 pub struct TorControlConnection {
     reader: FramedRead<ReadHalf<TcpStream>, LinesCodec>,
     writer: FramedWrite<WriteHalf<TcpStream>, LinesCodec>,
@@ -139,11 +173,13 @@ pub struct TorControlConnection {
 }
 
 impl TorControlConnection {
+    /// Connect to the Tor server. This is generally how you create a connection to the server
     pub async fn connect<A: ToSocketAddrs>(addrs: A) -> Result<Self, TorError> {
         let this = Self::with_stream(TcpStream::connect(addrs).await?)?;
         Ok(this)
     }
 
+    /// Convert an existing TCPStream into a connection object
     pub fn with_stream(stream: TcpStream) -> Result<Self, TorError> {
         let (reader, writer) = tokio::io::split(stream);
         Ok(Self {
@@ -153,12 +189,14 @@ impl TorControlConnection {
         })
     }
 
+    /// Write to the Tor Server
     async fn write(&mut self, data: &str) -> Result<(), TorError> {
         self.writer.send(data).await?;
         Ok(())
     }
 
-    async fn get_protocol_info(&mut self) -> Result<ProtocolInfo, TorError> {
+    /// Send the PROTOCOLINFO command and parse the response
+    pub async fn get_protocol_info(&mut self) -> Result<ProtocolInfo, TorError> {
         if self.protocol_info.is_some() {
             Ok(self.protocol_info.clone().unwrap())
         } else {
@@ -177,41 +215,54 @@ impl TorControlConnection {
                     Regex::new(r"^PROTOCOLINFO 1\nAUTH METHODS=(?P<auth_methods>[^ ]*)( COOKIEFILE=(?P<cookie_file>.*))*\nVERSION Tor=(?P<tor_version>.*)\n")
                         .unwrap();
             }
-            let captures = RE.captures(&control_response.reply).unwrap();
+            let captures = match RE.captures(&control_response.reply) {
+                Some(captures) => captures,
+                None => {
+                    return Err(TorError::protocol_error(
+                        "Error parsing PROTOCOLINFO response",
+                    ))
+                }
+            };
+            let auth_methods = parse_required_response_field(
+                &captures,
+                "auth_methods",
+                "AUTH METHODS",
+                "PROTOCOLINFO",
+            )?
+            .split(',')
+            .map(|s| s.to_string())
+            .collect();
+            let tor_version =
+                parse_required_response_field(&captures, "tor_version", "VERSION", "PROTOCOLINFO")?
+                    .replace('"', "");
             let protocol_info = ProtocolInfo {
-                auth_methods: captures
-                    .name("auth_methods")
-                    .unwrap()
-                    .as_str()
-                    .split(",")
-                    .map(|s| s.to_string())
-                    .collect(),
+                auth_methods,
                 cookie_file: captures.name("cookie_file").map(|c| c.as_str().to_string()),
-                tor_version: captures
-                    .name("tor_version")
-                    .unwrap()
-                    .as_str()
-                    .replace("\"", ""),
+                tor_version,
             };
             self.protocol_info = Some(protocol_info.clone());
             Ok(protocol_info)
         }
     }
 
+    /// Authenticate to the Tor server using the passed-in method
     pub async fn authenticate(&mut self, method: TorAuthentication) -> Result<(), TorError> {
         method.authenticate(self).await?;
         Ok(())
     }
 
+    /// Send a general command to the Tor server
     pub async fn send_command(
         &mut self,
         command: &str,
         arguments: Option<&str>,
     ) -> Result<ControlResponse, TorError> {
-        match arguments {
-            None => self.write(command).await?,
-            Some(arguments) => self.write(&format!("{} {}", command, arguments)).await?,
+        let command_string = match arguments {
+            None => command.to_string(),
+            Some(arguments) => format!("{} {}", command, arguments),
         };
+        info!("=> {}", command_string);
+        self.write(&command_string).await?;
         match read_control_response(&mut self.reader).await {
             Ok(control_response) => match control_response.status_code {
                 250 | 251 => Ok(control_response),
@@ -221,6 +272,7 @@ impl TorControlConnection {
         }
     }
 
+    /// Create an onion service.
     pub async fn create_onion_service(
         &mut self,
         virt_port: u16,
@@ -270,7 +322,7 @@ impl TorControlConnection {
         let control_response = self
             .send_command("ADD_ONION", Some(&request_string))
             .await?;
-        debug!(
+        info!(
             "Sent ADD_ONION command, got control response {:?}",
             control_response
         );
@@ -291,7 +343,12 @@ impl TorControlConnection {
         match RE.captures(&control_response.reply) {
             Some(captures) => {
                 // Parse the Hash value
-                let hash_string = &captures.name("service_id").unwrap().as_str();
+                let hash_string = parse_required_response_field(
+                    &captures,
+                    "service_id",
+                    "ServiceID",
+                    "ADD_ONION",
+                )?;
 
                 // Retrieve the key, either the one passed in or the one
                 // returned from the controller
