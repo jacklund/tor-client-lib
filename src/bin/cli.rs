@@ -29,6 +29,35 @@ fn connect(args: HashMap<String, Value>, context: &mut Context) -> Result<Option
     }
 }
 
+fn protocol_info(_args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
+    let connection: &mut TorControlConnection = match &mut context.connection {
+        Some(connection) => connection,
+        None => {
+            return Ok(Some(
+                "Error: you must connect first with the 'connect' command".to_string(),
+            ))
+        }
+    };
+
+    match RUNTIME.block_on(connection.get_protocol_info()) {
+        Ok(protocol_info) => {
+            let auth_methods = protocol_info.auth_methods.join(", ");
+            let cookie_file_string = match protocol_info.cookie_file {
+                Some(cookie_file) => {
+                    format!("Cookie file location: {}\n", cookie_file)
+                }
+                None => String::new(),
+            };
+            let tor_version = protocol_info.tor_version;
+            Ok(Some(format!(
+                "Allowed authentication methods: {}\n{}TOR version: {}",
+                auth_methods, cookie_file_string, tor_version,
+            )))
+        }
+        Err(error) => Ok(Some(format!("Error getting protocol info: {}", error))),
+    }
+}
+
 fn authenticate(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let connection: &mut TorControlConnection = match &mut context.connection {
         Some(connection) => connection,
@@ -78,7 +107,8 @@ pub fn main() -> Result<()> {
             Command::new("authenticate", authenticate)
                 .with_parameter(Parameter::new("auth_type").set_required(true)?)?
                 .with_help("Authenticate to the Tor server using the specified auth method"),
-        );
+        )
+        .add_command(Command::new("protocol_info", protocol_info).with_help("Get protocol info"));
 
     repl.run()
 }

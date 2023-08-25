@@ -186,16 +186,13 @@ impl TorAuthentication {
                     // None means to read the cookie from the cookie file as defined in the
                     // server's protocol_info
                     None => match protocol_info.cookie_file {
-                        Some(cookie_file) => {
-                            let file = cookie_file.replace('"', "");
-                            match std::fs::read(file.clone()) {
-                                Ok(cookie) => safe_cookie_authentication(&cookie, connection).await,
-                                Err(error) => Err(TorError::authentication_error(&format!(
-                                    "Error reading cookie file {}: {}",
-                                    file, error
-                                ))),
-                            }
-                        }
+                        Some(cookie_file) => match std::fs::read(cookie_file.clone()) {
+                            Ok(cookie) => safe_cookie_authentication(&cookie, connection).await,
+                            Err(error) => Err(TorError::authentication_error(&format!(
+                                "Error reading cookie file {}: {}",
+                                cookie_file, error
+                            ))),
+                        },
                         None => Err(TorError::authentication_error(
                             "No cookie file provided in tor protocol info",
                         )),

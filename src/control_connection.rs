@@ -237,7 +237,9 @@ impl TorControlConnection {
                     .replace('"', "");
             let protocol_info = ProtocolInfo {
                 auth_methods,
-                cookie_file: captures.name("cookie_file").map(|c| c.as_str().to_string()),
+                cookie_file: captures
+                    .name("cookie_file")
+                    .map(|c| c.as_str().replace('"', "").to_string()),
                 tor_version,
             };
             self.protocol_info = Some(protocol_info.clone());
