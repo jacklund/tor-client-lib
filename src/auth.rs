@@ -105,7 +105,7 @@ async fn safe_cookie_authentication(
     let message = validate_server_hash(cookie, &mut client_nonce, &mut server_nonce, &server_hash)?;
 
     // Generate authentication string
-    let auth_string = hex::encode(&generate_hmac(
+    let auth_string = hex::encode(generate_hmac(
         b"Tor safe cookie authentication controller-to-server hash",
         &message,
     ));

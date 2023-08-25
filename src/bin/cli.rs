@@ -1,7 +1,6 @@
 use lazy_static::lazy_static;
 use repl_rs::{Command, Parameter, Result, Value};
 use repl_rs::{Convert, Repl};
-use rpassword;
 use std::collections::HashMap;
 use tokio::runtime::Runtime;
 use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
