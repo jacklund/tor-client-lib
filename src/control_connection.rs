@@ -134,7 +134,7 @@ fn format_onion_service_request_string(
 ) -> String {
     let flags = if transient { "Flags=Detach" } else { "" };
     format!(
-        "{}:{} {}, Port={},{}",
+        "{}:{} {} Port={},{}",
         key_type, key_blob, flags, virt_port, listen_address
     )
 }
@@ -388,6 +388,29 @@ impl TorControlConnection {
                 "Unexpected response: {} {}",
                 control_response.status_code, control_response.reply,
             ))),
+        }
+    }
+
+    pub async fn delete_onion_service(&mut self, service_id: &str) -> Result<(), TorError> {
+        // Just in case someone passes in the ".onion" part
+        let service_id_string = service_id.replace(".onion", "");
+
+        // Send command to Tor controller
+        let control_response = self
+            .send_command("DEL_ONION", Some(&service_id_string))
+            .await?;
+        info!(
+            "Sent DEL_ONION command, got control response {:?}",
+            control_response
+        );
+
+        if control_response.status_code != 250 {
+            Err(TorError::protocol_error(&format!(
+                "Expected status code 250, got {}",
+                control_response.status_code
+            )))
+        } else {
+            Ok(())
         }
     }
 }

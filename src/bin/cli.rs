@@ -3,7 +3,9 @@ use repl_rs::{Command, Parameter, Result, Value};
 use repl_rs::{Convert, Repl};
 use std::collections::HashMap;
 use tokio::runtime::Runtime;
-use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
+use tor_client_lib::{
+    auth::TorAuthentication, control_connection::TorControlConnection, key::KeyRequest,
+};
 
 lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
@@ -92,6 +94,67 @@ fn authenticate(args: HashMap<String, Value>, context: &mut Context) -> Result<O
     }
 }
 
+fn add_onion_service(
+    args: HashMap<String, Value>,
+    context: &mut Context,
+) -> Result<Option<String>> {
+    let connection: &mut TorControlConnection = match &mut context.connection {
+        Some(connection) => connection,
+        None => {
+            return Ok(Some(
+                "Error: you must connect first with the 'connect' command".to_string(),
+            ))
+        }
+    };
+
+    let virt_port = args.get("virt_port").unwrap().convert()?;
+    let listen_address = args.get("listen_address").unwrap().to_string();
+    let transient = match args.get("transient") {
+        Some(value) => match value.to_string().parse::<bool>() {
+            Ok(transient) => transient,
+            Err(error) => return Ok(Some(format!("Error parsing transient value: {}", error))),
+        },
+        None => true,
+    };
+
+    match RUNTIME.block_on(connection.create_onion_service(
+        virt_port,
+        &listen_address,
+        transient,
+        KeyRequest::Best,
+    )) {
+        Ok(service) => Ok(Some(format!(
+            "Onion service with service ID '{}' created",
+            service.service_id
+        ))),
+        Err(error) => Ok(Some(format!("Error creating onion service: {}", error))),
+    }
+}
+
+fn delete_onion_service(
+    args: HashMap<String, Value>,
+    context: &mut Context,
+) -> Result<Option<String>> {
+    let connection: &mut TorControlConnection = match &mut context.connection {
+        Some(connection) => connection,
+        None => {
+            return Ok(Some(
+                "Error: you must connect first with the 'connect' command".to_string(),
+            ))
+        }
+    };
+
+    let service_id = args.get("service_id").unwrap().to_string();
+
+    match RUNTIME.block_on(connection.delete_onion_service(&service_id)) {
+        Ok(_) => Ok(Some(format!(
+            "Onion service with service ID '{}' deleted",
+            service_id
+        ))),
+        Err(error) => Ok(Some(format!("Error deleting onion service: {}", error))),
+    }
+}
+
 pub fn main() -> Result<()> {
     env_logger::init();
     let mut repl = Repl::new(Context::default())
@@ -108,7 +171,19 @@ pub fn main() -> Result<()> {
                 .with_parameter(Parameter::new("auth_type").set_required(true)?)?
                 .with_help("Authenticate to the Tor server using the specified auth method"),
         )
-        .add_command(Command::new("protocol_info", protocol_info).with_help("Get protocol info"));
+        .add_command(Command::new("protocol_info", protocol_info).with_help("Get protocol info"))
+        .add_command(
+            Command::new("add_onion_service", add_onion_service)
+                .with_parameter(Parameter::new("virt_port").set_required(true)?)?
+                .with_parameter(Parameter::new("listen_address").set_required(true)?)?
+                .with_parameter(Parameter::new("transient").set_default("true")?)?
+                .with_help("Create an onion service"),
+        )
+        .add_command(
+            Command::new("delete_onion_service", delete_onion_service)
+                .with_parameter(Parameter::new("service_id").set_required(true)?)?
+                .with_help("Delete an onion service"),
+        );
 
     repl.run()
 }
