@@ -139,6 +139,46 @@ fn format_onion_service_request_string(
     )
 }
 
+fn format_key_request_string(
+    virt_port: u16,
+    listen_address: &str,
+    transient: bool,
+    key_request: &KeyRequest,
+) -> String {
+    match key_request {
+        KeyRequest::RSA1024 => format_onion_service_request_string(
+            "NEW",
+            "RSA1024",
+            virt_port,
+            listen_address,
+            transient,
+        ),
+        KeyRequest::ED25519V3 => format_onion_service_request_string(
+            "NEW",
+            "ED25519-V3",
+            virt_port,
+            listen_address,
+            transient,
+        ),
+        KeyRequest::Best => {
+            format_onion_service_request_string("NEW", "BEST", virt_port, listen_address, transient)
+        }
+        KeyRequest::PrivateKey(ref private_key) => {
+            let (key_type, blob) = match **private_key {
+                PrivateKey::RSA1024(_) => ("RSA1024", private_key.to_blob()),
+                PrivateKey::ED25519V3(_) => ("ED25519-V3", private_key.to_blob()),
+            };
+            format_onion_service_request_string(
+                key_type,
+                &blob,
+                virt_port,
+                listen_address,
+                transient,
+            )
+        }
+    }
+}
+
 /// Parse a response field that is required, i.e., throw an error if it's not there
 fn parse_required_response_field<'a>(
     captures: &Captures<'a>,
@@ -283,42 +323,8 @@ impl TorControlConnection {
         key_request: KeyRequest,
     ) -> Result<OnionService, TorError> {
         // Create the request string from the arguments
-        let request_string = match key_request {
-            KeyRequest::RSA1024 => format_onion_service_request_string(
-                "NEW",
-                "RSA1024",
-                virt_port,
-                listen_address,
-                transient,
-            ),
-            KeyRequest::ED25519V3 => format_onion_service_request_string(
-                "NEW",
-                "ED25519-V3",
-                virt_port,
-                listen_address,
-                transient,
-            ),
-            KeyRequest::Best => format_onion_service_request_string(
-                "NEW",
-                "BEST",
-                virt_port,
-                listen_address,
-                transient,
-            ),
-            KeyRequest::PrivateKey(ref private_key) => {
-                let (key_type, blob) = match **private_key {
-                    PrivateKey::RSA1024(_) => ("RSA1024", private_key.to_blob()),
-                    PrivateKey::ED25519V3(_) => ("ED25519-V3", private_key.to_blob()),
-                };
-                format_onion_service_request_string(
-                    key_type,
-                    &blob,
-                    virt_port,
-                    listen_address,
-                    transient,
-                )
-            }
-        };
+        let request_string =
+            format_key_request_string(virt_port, listen_address, transient, &key_request);
 
         // Send command to Tor controller
         let control_response = self
