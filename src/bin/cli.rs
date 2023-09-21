@@ -123,10 +123,16 @@ fn add_onion_service(
         transient,
         KeyRequest::Best,
     )) {
-        Ok(service) => Ok(Some(format!(
-            "Onion service with service ID '{}' created",
-            service.service_id
-        ))),
+        Ok(service) => {
+            println!(
+                "public key: {}",
+                hex::encode(service.private_key.public_key().to_vec().unwrap())
+            );
+            Ok(Some(format!(
+                "Onion service with service ID '{}' created",
+                service.service_id
+            )))
+        }
         Err(error) => Ok(Some(format!("Error creating onion service: {}", error))),
     }
 }

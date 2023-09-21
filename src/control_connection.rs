@@ -13,7 +13,6 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
-#[derive(Clone, Debug)]
 pub struct OnionService {
     pub virt_port: u16,
     pub listen_address: String,
@@ -166,7 +165,7 @@ fn format_key_request_string(
         KeyRequest::PrivateKey(ref private_key) => {
             let (key_type, blob) = match **private_key {
                 PrivateKey::RSA1024(_) => ("RSA1024", private_key.to_blob()),
-                PrivateKey::ED25519V3(_) => ("ED25519-V3", private_key.to_blob()),
+                PrivateKey::ED25519V3 { .. } => ("ED25519-V3", private_key.to_blob()),
             };
             format_onion_service_request_string(
                 key_type,
@@ -375,12 +374,28 @@ impl TorControlConnection {
                     },
                 };
 
+                let expected_service_id = match key.public_key().service_id() {
+                    Ok(service_id) => service_id,
+                    Err(error) => {
+                        return Err(TorError::protocol_error(&format!(
+                            "Error generating onion service ID from public key: {}",
+                            error
+                        )))
+                    }
+                };
+                if expected_service_id != hash_string {
+                    return Err(
+                        TorError::protocol_error(&format!(
+                                "Service ID for onion service returned by tor ({}) doesn't match the service ID generated from public key ({})",
+                                hash_string, expected_service_id)));
+                }
+
                 // Return the Onion Service
                 Ok(OnionService {
                     virt_port,
                     listen_address: listen_address.to_string(),
                     service_id: hash_string.to_string(),
-                    address: format!("{}:{}", hash_string, virt_port),
+                    address: format!("{}.onion:{}", hash_string, virt_port),
                     private_key: key,
                 })
             }
@@ -515,9 +530,13 @@ mod tests {
     async fn test_authenticate() -> Result<(), Box<dyn std::error::Error>> {
         let (client, server) = create_mock().await?;
         let mut server = Framed::new(server, LinesCodec::new());
+        server
+            .send("250-PROTOCOLINFO 1\n250-AUTH METHODS=NULL\n250-VERSION Tor=1\n250 OK")
+            .await?;
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
         let result = tor.authenticate(TorAuthentication::Null).await;
+        println!("{:?}", result);
         assert!(result.is_ok());
 
         let (client, server) = create_mock().await?;
@@ -539,9 +558,11 @@ mod tests {
     async fn test_create_onion_service() -> Result<(), Box<dyn std::error::Error>> {
         let (client, server) = create_mock().await?;
         let mut server = Framed::new(server, LinesCodec::new());
-        server.send("250-ServiceID=foobar").await?;
         server
-            .send("250-PrivateKey=ED25519-V3:VEhJU0lTTVlOSUZUWUNPT09MU1VQRVJTRUNSRVRLRVk=")
+            .send("250-ServiceID=vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad")
+            .await?;
+        server
+            .send("250-PrivateKey=ED25519-V3:0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==")
             .await?;
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
@@ -550,8 +571,14 @@ mod tests {
             .await?;
         assert_eq!(8080, onion_service.virt_port);
         assert_eq!("localhost:8080", onion_service.listen_address);
-        assert_eq!("foobar", onion_service.service_id);
-        assert_eq!("foobar:8080", onion_service.address);
+        assert_eq!(
+            "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",
+            onion_service.service_id
+        );
+        assert_eq!(
+            "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad.onion:8080",
+            onion_service.address
+        );
         Ok(())
     }
 
