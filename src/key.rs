@@ -113,11 +113,29 @@ impl PublicKey {
     }
 }
 
-pub enum KeyRequest {
+pub enum KeyRequest<'a> {
     RSA1024,
     ED25519V3,
     Best,
-    PrivateKey(Box<PrivateKey>),
+    PrivateKey(&'a PrivateKey),
+}
+
+impl<'a> KeyRequest<'a> {
+    pub fn rsa1024() -> Self {
+        Self::RSA1024
+    }
+
+    pub fn ed25519() -> Self {
+        Self::ED25519V3
+    }
+
+    pub fn best() -> Self {
+        Self::Best
+    }
+
+    pub fn private_key(key: &'a PrivateKey) -> Self {
+        Self::PrivateKey(key)
+    }
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use crate::{
     auth::TorAuthentication,
     error::TorError,
-    key::{KeyRequest, PrivateKey},
+    key::{KeyRequest, PrivateKey, PublicKey},
 };
 use futures::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
@@ -18,7 +18,8 @@ pub struct OnionService {
     pub listen_address: String,
     pub service_id: String,
     pub address: String,
-    pub private_key: PrivateKey,
+    pub private_key: Option<PrivateKey>,
+    pub public_key: PublicKey,
 }
 
 #[derive(Debug)]
@@ -162,7 +163,7 @@ fn format_key_request_string(
         KeyRequest::Best => {
             format_onion_service_request_string("NEW", "BEST", virt_port, listen_address, transient)
         }
-        KeyRequest::PrivateKey(ref private_key) => {
+        KeyRequest::PrivateKey(private_key) => {
             let (key_type, blob) = match **private_key {
                 PrivateKey::RSA1024(_) => ("RSA1024", private_key.to_blob()),
                 PrivateKey::ED25519V3 { .. } => ("ED25519-V3", private_key.to_blob()),
@@ -314,12 +315,12 @@ impl TorControlConnection {
     }
 
     /// Create an onion service.
-    pub async fn create_onion_service(
+    pub async fn create_onion_service<'a>(
         &mut self,
         virt_port: u16,
         listen_address: &str,
         transient: bool,
-        key_request: KeyRequest,
+        key_request: KeyRequest<'a>,
     ) -> Result<OnionService, TorError> {
         // Create the request string from the arguments
         let request_string =
@@ -359,13 +360,17 @@ impl TorControlConnection {
 
                 // Retrieve the key, either the one passed in or the one
                 // returned from the controller
-                let key = match captures.name("key_type") {
-                    Some(m) => PrivateKey::from_blob(
-                        m.as_str(),
-                        captures.name("key_blob").unwrap().as_str(),
-                    )?,
+                let (private_key, public_key) = match captures.name("key_type") {
+                    Some(m) => {
+                        let private_key = PrivateKey::from_blob(
+                            m.as_str(),
+                            captures.name("key_blob").unwrap().as_str(),
+                        )?;
+                        let public_key = private_key.public_key();
+                        (Some(private_key), public_key)
+                    }
                     None => match key_request {
-                        KeyRequest::PrivateKey(key) => *key,
+                        KeyRequest::PrivateKey(private_key) => (None, private_key.public_key()),
                         _ => {
                             return Err(TorError::protocol_error(
                                 "Expected key to be returned by Tor",
@@ -374,7 +379,7 @@ impl TorControlConnection {
                     },
                 };
 
-                let expected_service_id = match key.public_key().service_id() {
+                let expected_service_id = match public_key.service_id() {
                     Ok(service_id) => service_id,
                     Err(error) => {
                         return Err(TorError::protocol_error(&format!(
@@ -396,7 +401,8 @@ impl TorControlConnection {
                     listen_address: listen_address.to_string(),
                     service_id: hash_string.to_string(),
                     address: format!("{}.onion:{}", hash_string, virt_port),
-                    private_key: key,
+                    private_key,
+                    public_key,
                 })
             }
             None => Err(TorError::ProtocolError(format!(
