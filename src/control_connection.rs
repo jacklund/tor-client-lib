@@ -195,6 +195,62 @@ fn parse_required_response_field<'a>(
     }
 }
 
+fn parse_add_onion_response<'a>(
+    captures: &Captures<'a>,
+    virt_port: u16,
+    listen_address: &str,
+    key_request: KeyRequest<'a>,
+) -> Result<OnionService, TorError> {
+    // Parse the Hash value
+    let hash_string =
+        parse_required_response_field(captures, "service_id", "ServiceID", "ADD_ONION")?;
+
+    // Retrieve the key, either the one passed in or the one
+    // returned from the controller
+    let (private_key, public_key) = match captures.name("key_type") {
+        Some(m) => {
+            let private_key =
+                PrivateKey::from_blob(m.as_str(), captures.name("key_blob").unwrap().as_str())?;
+            let public_key = private_key.public_key();
+            (Some(private_key), public_key)
+        }
+        None => match key_request {
+            KeyRequest::PrivateKey(private_key) => (None, private_key.public_key()),
+            _ => {
+                return Err(TorError::protocol_error(
+                    "Expected key to be returned by Tor",
+                ))
+            }
+        },
+    };
+
+    let expected_service_id = match public_key.service_id() {
+        Ok(service_id) => service_id,
+        Err(error) => {
+            return Err(TorError::protocol_error(&format!(
+                "Error generating onion service ID from public key: {}",
+                error
+            )))
+        }
+    };
+    if expected_service_id != hash_string {
+        return Err(
+            TorError::protocol_error(&format!(
+                    "Service ID for onion service returned by tor ({}) doesn't match the service ID generated from public key ({})",
+                    hash_string, expected_service_id)));
+    }
+
+    // Return the Onion Service
+    Ok(OnionService {
+        virt_port,
+        listen_address: listen_address.to_string(),
+        service_id: hash_string.to_string(),
+        address: format!("{}.onion:{}", hash_string, virt_port),
+        private_key,
+        public_key,
+    })
+}
+
 /// ProtocolInfo struct, contains information from the response to the
 /// PROTOCOLINFO command
 #[derive(Clone, Debug)]
@@ -350,60 +406,7 @@ impl TorControlConnection {
         }
         match RE.captures(&control_response.reply) {
             Some(captures) => {
-                // Parse the Hash value
-                let hash_string = parse_required_response_field(
-                    &captures,
-                    "service_id",
-                    "ServiceID",
-                    "ADD_ONION",
-                )?;
-
-                // Retrieve the key, either the one passed in or the one
-                // returned from the controller
-                let (private_key, public_key) = match captures.name("key_type") {
-                    Some(m) => {
-                        let private_key = PrivateKey::from_blob(
-                            m.as_str(),
-                            captures.name("key_blob").unwrap().as_str(),
-                        )?;
-                        let public_key = private_key.public_key();
-                        (Some(private_key), public_key)
-                    }
-                    None => match key_request {
-                        KeyRequest::PrivateKey(private_key) => (None, private_key.public_key()),
-                        _ => {
-                            return Err(TorError::protocol_error(
-                                "Expected key to be returned by Tor",
-                            ))
-                        }
-                    },
-                };
-
-                let expected_service_id = match public_key.service_id() {
-                    Ok(service_id) => service_id,
-                    Err(error) => {
-                        return Err(TorError::protocol_error(&format!(
-                            "Error generating onion service ID from public key: {}",
-                            error
-                        )))
-                    }
-                };
-                if expected_service_id != hash_string {
-                    return Err(
-                        TorError::protocol_error(&format!(
-                                "Service ID for onion service returned by tor ({}) doesn't match the service ID generated from public key ({})",
-                                hash_string, expected_service_id)));
-                }
-
-                // Return the Onion Service
-                Ok(OnionService {
-                    virt_port,
-                    listen_address: listen_address.to_string(),
-                    service_id: hash_string.to_string(),
-                    address: format!("{}.onion:{}", hash_string, virt_port),
-                    private_key,
-                    public_key,
-                })
+                parse_add_onion_response(&captures, virt_port, listen_address, key_request)
             }
             None => Err(TorError::ProtocolError(format!(
                 "Unexpected response: {} {}",
