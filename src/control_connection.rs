@@ -1,8 +1,9 @@
 use crate::{
     auth::TorAuthentication,
     error::TorError,
-    key::{KeyRequest, PrivateKey, PublicKey},
+    key::{blobify, tor_service_id, TorEd25519SigningKey},
 };
+use ed25519_dalek::SigningKey;
 use futures::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
 use log::info;
@@ -18,8 +19,7 @@ pub struct OnionService {
     pub listen_address: String,
     pub service_id: String,
     pub address: String,
-    pub private_key: Option<PrivateKey>,
-    pub public_key: PublicKey,
+    pub signing_key: Option<TorEd25519SigningKey>,
 }
 
 #[derive(Debug)]
@@ -143,38 +143,18 @@ fn format_key_request_string(
     virt_port: u16,
     listen_address: &str,
     transient: bool,
-    key_request: &KeyRequest,
+    signing_key: Option<&SigningKey>,
 ) -> String {
-    match key_request {
-        KeyRequest::RSA1024 => format_onion_service_request_string(
-            "NEW",
-            "RSA1024",
-            virt_port,
-            listen_address,
-            transient,
-        ),
-        KeyRequest::ED25519V3 => format_onion_service_request_string(
-            "NEW",
+    match signing_key {
+        Some(signing_key) => format_onion_service_request_string(
             "ED25519-V3",
+            &blobify(&signing_key),
             virt_port,
             listen_address,
             transient,
         ),
-        KeyRequest::Best => {
+        None => {
             format_onion_service_request_string("NEW", "BEST", virt_port, listen_address, transient)
-        }
-        KeyRequest::PrivateKey(private_key) => {
-            let (key_type, blob) = match **private_key {
-                PrivateKey::RSA1024(_) => ("RSA1024", private_key.to_blob()),
-                PrivateKey::ED25519V3 { .. } => ("ED25519-V3", private_key.to_blob()),
-            };
-            format_onion_service_request_string(
-                key_type,
-                &blob,
-                virt_port,
-                listen_address,
-                transient,
-            )
         }
     }
 }
@@ -199,7 +179,7 @@ fn parse_add_onion_response<'a>(
     captures: &Captures<'a>,
     virt_port: u16,
     listen_address: &str,
-    key_request: KeyRequest<'a>,
+    signing_key: Option<&SigningKey>,
 ) -> Result<OnionService, TorError> {
     // Parse the Hash value
     let hash_string =
@@ -207,36 +187,29 @@ fn parse_add_onion_response<'a>(
 
     // Retrieve the key, either the one passed in or the one
     // returned from the controller
-    let (private_key, public_key) = match captures.name("key_type") {
-        Some(m) => {
-            let private_key =
-                PrivateKey::from_blob(m.as_str(), captures.name("key_blob").unwrap().as_str())?;
-            let public_key = private_key.public_key();
-            (Some(private_key), public_key)
-        }
-        None => match key_request {
-            KeyRequest::PrivateKey(private_key) => (None, private_key.public_key()),
-            _ => {
+    let (returned_signing_key, verifying_key) = match signing_key {
+        Some(signing_key) => (None, signing_key.verifying_key()),
+        None => match captures.name("key_type") {
+            Some(_) => {
+                let signing_key =
+                    TorEd25519SigningKey::from_blob(captures.name("key_blob").unwrap().as_str());
+                let verifying_key = signing_key.verifying_key;
+                (Some(signing_key), verifying_key)
+            }
+            None => {
                 return Err(TorError::protocol_error(
-                    "Expected key to be returned by Tor",
-                ))
+                    "Expected signing key to be returned by Tor",
+                ));
             }
         },
     };
 
-    let expected_service_id = match public_key.service_id() {
-        Ok(service_id) => service_id,
-        Err(error) => {
-            return Err(TorError::protocol_error(&format!(
-                "Error generating onion service ID from public key: {}",
-                error
-            )))
-        }
-    };
+    let expected_service_id = tor_service_id(&verifying_key);
+
     if expected_service_id != hash_string {
         return Err(
             TorError::protocol_error(&format!(
-                    "Service ID for onion service returned by tor ({}) doesn't match the service ID generated from public key ({})",
+                    "Service ID for onion service returned by tor ({}) doesn't match the service ID generated from verifying key ({})",
                     hash_string, expected_service_id)));
     }
 
@@ -246,8 +219,7 @@ fn parse_add_onion_response<'a>(
         listen_address: listen_address.to_string(),
         service_id: hash_string.to_string(),
         address: format!("{}.onion:{}", hash_string, virt_port),
-        private_key,
-        public_key,
+        signing_key: returned_signing_key,
     })
 }
 
@@ -371,16 +343,16 @@ impl TorControlConnection {
     }
 
     /// Create an onion service.
-    pub async fn create_onion_service<'a>(
+    pub async fn create_onion_service(
         &mut self,
         virt_port: u16,
         listen_address: &str,
         transient: bool,
-        key_request: KeyRequest<'a>,
+        signing_key: Option<&SigningKey>,
     ) -> Result<OnionService, TorError> {
         // Create the request string from the arguments
         let request_string =
-            format_key_request_string(virt_port, listen_address, transient, &key_request);
+            format_key_request_string(virt_port, listen_address, transient, signing_key);
 
         // Send command to Tor controller
         let control_response = self
@@ -406,7 +378,7 @@ impl TorControlConnection {
         }
         match RE.captures(&control_response.reply) {
             Some(captures) => {
-                parse_add_onion_response(&captures, virt_port, listen_address, key_request)
+                parse_add_onion_response(&captures, virt_port, listen_address, signing_key)
             }
             None => Err(TorError::ProtocolError(format!(
                 "Unexpected response: {} {}",
@@ -576,7 +548,7 @@ mod tests {
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
         let onion_service = tor
-            .create_onion_service(8080, "localhost:8080", true, KeyRequest::Best)
+            .create_onion_service(8080, "localhost:8080", true, None)
             .await?;
         assert_eq!(8080, onion_service.virt_port);
         assert_eq!("localhost:8080", onion_service.listen_address);

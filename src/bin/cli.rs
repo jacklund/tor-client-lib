@@ -3,9 +3,7 @@ use repl_rs::{Command, Parameter, Result, Value};
 use repl_rs::{Convert, Repl};
 use std::collections::HashMap;
 use tokio::runtime::Runtime;
-use tor_client_lib::{
-    auth::TorAuthentication, control_connection::TorControlConnection, key::KeyRequest,
-};
+use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
 
 lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
@@ -121,12 +119,12 @@ fn add_onion_service(
         virt_port,
         &listen_address,
         transient,
-        KeyRequest::Best,
+        None,
     )) {
         Ok(service) => {
             println!(
                 "public key: {}",
-                hex::encode(service.public_key.to_vec().unwrap())
+                hex::encode(service.signing_key.unwrap().verifying_key.as_bytes())
             );
             Ok(Some(format!(
                 "Onion service with service ID '{}' created",
