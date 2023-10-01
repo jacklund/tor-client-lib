@@ -1,7 +1,7 @@
 use crate::{
     auth::TorAuthentication,
     error::TorError,
-    key::{blobify, tor_service_id, TorEd25519SigningKey},
+    key::{tor_service_id, Blobify, TorEd25519SigningKey},
 };
 use ed25519_dalek::SigningKey;
 use futures::{SinkExt, StreamExt};
@@ -148,7 +148,7 @@ fn format_key_request_string(
     match signing_key {
         Some(signing_key) => format_onion_service_request_string(
             "ED25519-V3",
-            &blobify(&signing_key),
+            &signing_key.to_blob(),
             virt_port,
             listen_address,
             transient,
