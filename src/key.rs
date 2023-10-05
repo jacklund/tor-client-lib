@@ -13,6 +13,96 @@ pub trait Blobify {
     fn to_blob(&self) -> String;
 }
 
+const TOR_VERSION: u8 = 3;
+
+pub struct TorServiceId {
+    verifying_key: VerifyingKey,
+    service_id: String,
+}
+
+/// Generate the Tor service ID from a verifying key
+/// From section 6 of rend-spec-v3.txt
+impl std::convert::From<VerifyingKey> for TorServiceId {
+    fn from(verifying_key: VerifyingKey) -> Self {
+        // Version number
+        let version = &[TOR_VERSION];
+
+        // Hash the verifying key concatenated with the checksum and the version
+        let verifying_key_bytes = verifying_key.as_bytes().to_vec();
+        let checksum = TorServiceId::calculate_checksum(&verifying_key_bytes);
+
+        // Base32 the verifying key concatenated with the checksum and the version
+        let mut onion_bytes = verifying_key_bytes;
+        onion_bytes.extend_from_slice(&checksum);
+        onion_bytes.extend_from_slice(version);
+
+        Self {
+            verifying_key,
+            service_id: base32::encode(Alphabet::RFC4648 { padding: false }, &onion_bytes)
+                .to_lowercase(),
+        }
+    }
+}
+
+pub struct ParseServiceIDError(String);
+
+impl std::str::FromStr for TorServiceId {
+    type Err = ParseServiceIDError;
+
+    fn from_str(service_id: &str) -> Result<Self, Self::Err> {
+        let onion_bytes = match base32::decode(Alphabet::RFC4648 { padding: false }, service_id) {
+            Some(bytes) => bytes,
+            None => {
+                return Err(ParseServiceIDError(
+                    "Error base32 decoding service ID".to_string(),
+                ))
+            }
+        };
+        let mut verifying_key_bytes = [0u8; 32];
+        verifying_key_bytes.copy_from_slice(&onion_bytes[..32]);
+        let verifying_key = match VerifyingKey::from_bytes(&verifying_key_bytes) {
+            Ok(key) => key,
+            Err(_) => {
+                return Err(ParseServiceIDError(
+                    "Error parsing verifying key from bytes".to_string(),
+                ))
+            }
+        };
+        let mut checksum = [0u8; 2];
+        checksum.copy_from_slice(&onion_bytes[32..34]);
+        let verifying_checksum = Self::calculate_checksum(&verifying_key_bytes);
+        if checksum != verifying_checksum {
+            return Err(ParseServiceIDError("Invalid checksum".to_string()));
+        }
+
+        Ok(Self {
+            verifying_key,
+            service_id: service_id.to_string(),
+        })
+    }
+}
+
+impl TorServiceId {
+    fn calculate_checksum(verifying_key_bytes: &[u8]) -> [u8; 2] {
+        let mut checksum_bytes = ".onion checksum".as_bytes().to_vec();
+        checksum_bytes.extend_from_slice(&verifying_key_bytes);
+        checksum_bytes.extend_from_slice(&[TOR_VERSION]);
+        let mut checksum = [0u8; 2];
+        checksum
+            .copy_from_slice(&Sha3_256::default().chain_update(&checksum_bytes).finalize()[..2]);
+
+        checksum
+    }
+
+    pub fn verifying_key(&self) -> VerifyingKey {
+        self.verifying_key
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.service_id
+    }
+}
+
 // It sucks to have to have a separate type for the ED25519 key returned by Tor, but
 // because of the fact that they don't return the original secret key, but instead return
 // the scalar and hash prefix, we can't retrieve the secret key from them, so we can't turn
@@ -99,27 +189,6 @@ impl Blobify for DalekSigningKey {
     }
 }
 
-/// Generate the Tor service ID from a verifying key
-/// From section 6 of rend-spec-v3.txt
-pub fn tor_service_id(verifying_key: &VerifyingKey) -> String {
-    // Version number
-    let version = &[3u8];
-
-    // Hash the verifying key concatenated with the checksum and the version
-    let verifying_key_bytes = verifying_key.as_bytes().to_vec();
-    let mut checksum_bytes = ".onion checksum".as_bytes().to_vec();
-    checksum_bytes.extend_from_slice(&verifying_key_bytes);
-    checksum_bytes.extend_from_slice(version);
-    let checksum: Vec<u8> =
-        Sha3_256::default().chain_update(&checksum_bytes).finalize()[..2].to_vec();
-
-    // Base32 the verifying key concatenated with the checksum and the version
-    let mut onion_bytes = verifying_key_bytes;
-    onion_bytes.extend_from_slice(&checksum);
-    onion_bytes.extend_from_slice(version);
-    base32::encode(Alphabet::RFC4648 { padding: false }, &onion_bytes).to_lowercase()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,7 +202,7 @@ mod tests {
         let public_key = signing_key.verifying_key;
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",
-            tor_service_id(&public_key),
+            TorServiceId::from(public_key).as_str(),
         );
         Ok(())
     }

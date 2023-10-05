@@ -1,7 +1,7 @@
 use crate::{
     auth::TorAuthentication,
     error::TorError,
-    key::{tor_service_id, Blobify, TorEd25519SigningKey},
+    key::{Blobify, TorEd25519SigningKey, TorServiceId},
 };
 use ed25519_dalek::SigningKey;
 use futures::{SinkExt, StreamExt};
@@ -204,13 +204,13 @@ fn parse_add_onion_response<'a>(
         },
     };
 
-    let expected_service_id = tor_service_id(&verifying_key);
+    let expected_service_id: TorServiceId = verifying_key.into();
 
-    if expected_service_id != hash_string {
+    if expected_service_id.as_str() != hash_string {
         return Err(
             TorError::protocol_error(&format!(
                     "Service ID for onion service returned by tor ({}) doesn't match the service ID generated from verifying key ({})",
-                    hash_string, expected_service_id)));
+                    hash_string, expected_service_id.as_str())));
     }
 
     // Return the Onion Service
