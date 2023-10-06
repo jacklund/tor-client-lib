@@ -1,4 +1,4 @@
-use crate::base64;
+use crate::{base64, error::TorError};
 use base32::{self, Alphabet};
 use curve25519_dalek::{scalar::clamp_integer, Scalar};
 use ed25519_dalek::{
@@ -15,6 +15,7 @@ pub trait Blobify {
 
 const TOR_VERSION: u8 = 3;
 
+#[derive(Debug)]
 pub struct TorServiceId {
     verifying_key: VerifyingKey,
     service_id: String,
@@ -44,27 +45,21 @@ impl std::convert::From<VerifyingKey> for TorServiceId {
     }
 }
 
-pub struct ParseServiceIDError(String);
-
 impl std::str::FromStr for TorServiceId {
-    type Err = ParseServiceIDError;
+    type Err = TorError;
 
     fn from_str(service_id: &str) -> Result<Self, Self::Err> {
         let onion_bytes = match base32::decode(Alphabet::RFC4648 { padding: false }, service_id) {
             Some(bytes) => bytes,
-            None => {
-                return Err(ParseServiceIDError(
-                    "Error base32 decoding service ID".to_string(),
-                ))
-            }
+            None => return Err(TorError::protocol_error("Error base32 decoding service ID")),
         };
         let mut verifying_key_bytes = [0u8; 32];
         verifying_key_bytes.copy_from_slice(&onion_bytes[..32]);
         let verifying_key = match VerifyingKey::from_bytes(&verifying_key_bytes) {
             Ok(key) => key,
             Err(_) => {
-                return Err(ParseServiceIDError(
-                    "Error parsing verifying key from bytes".to_string(),
+                return Err(TorError::protocol_error(
+                    "Error parsing verifying key from bytes",
                 ))
             }
         };
@@ -72,7 +67,7 @@ impl std::str::FromStr for TorServiceId {
         checksum.copy_from_slice(&onion_bytes[32..34]);
         let verifying_checksum = Self::calculate_checksum(&verifying_key_bytes);
         if checksum != verifying_checksum {
-            return Err(ParseServiceIDError("Invalid checksum".to_string()));
+            return Err(TorError::protocol_error("Invalid checksum"));
         }
 
         Ok(Self {

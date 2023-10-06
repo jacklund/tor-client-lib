@@ -128,7 +128,7 @@ fn add_onion_service(
             );
             Ok(Some(format!(
                 "Onion service with service ID '{}' created",
-                service.service_id
+                service.service_id.as_str()
             )))
         }
         Err(error) => Ok(Some(format!("Error creating onion service: {}", error))),

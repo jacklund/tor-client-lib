@@ -8,6 +8,7 @@ use futures::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
 use log::info;
 use regex::{Captures, Regex};
+use std::str::FromStr;
 use tokio::{
     io::{ReadHalf, WriteHalf},
     net::{TcpStream, ToSocketAddrs},
@@ -17,7 +18,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 pub struct OnionService {
     pub virt_port: u16,
     pub listen_address: String,
-    pub service_id: String,
+    pub service_id: TorServiceId,
     pub address: String,
     pub signing_key: Option<TorEd25519SigningKey>,
 }
@@ -213,11 +214,21 @@ fn parse_add_onion_response<'a>(
                     hash_string, expected_service_id.as_str())));
     }
 
+    let service_id = match TorServiceId::from_str(hash_string) {
+        Ok(id) => id,
+        Err(error) => {
+            return Err(TorError::protocol_error(&format!(
+                "Error parsing Tor Service ID: {}",
+                error
+            )))
+        }
+    };
+
     // Return the Onion Service
     Ok(OnionService {
         virt_port,
         listen_address: listen_address.to_string(),
-        service_id: hash_string.to_string(),
+        service_id,
         address: format!("{}.onion:{}", hash_string, virt_port),
         signing_key: returned_signing_key,
     })
@@ -554,7 +565,7 @@ mod tests {
         assert_eq!("localhost:8080", onion_service.listen_address);
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",
-            onion_service.service_id
+            onion_service.service_id.as_str()
         );
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad.onion:8080",
