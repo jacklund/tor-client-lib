@@ -15,7 +15,7 @@ pub trait Blobify {
 
 const TOR_VERSION: u8 = 3;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TorServiceId {
     verifying_key: VerifyingKey,
     service_id: String,
