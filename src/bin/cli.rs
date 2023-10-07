@@ -124,7 +124,7 @@ fn add_onion_service(
         Ok(service) => {
             println!(
                 "public key: {}",
-                hex::encode(service.signing_key.unwrap().verifying_key.as_bytes())
+                hex::encode(service.signing_key.unwrap().verifying_key().as_bytes())
             );
             Ok(Some(format!(
                 "Onion service with service ID '{}' created",

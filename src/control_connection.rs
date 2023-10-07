@@ -1,7 +1,7 @@
 use crate::{
     auth::TorAuthentication,
     error::TorError,
-    key::{Blobify, TorEd25519SigningKey, TorServiceId},
+    key::{TorEd25519SigningKey, TorServiceId},
 };
 use ed25519_dalek::SigningKey;
 use futures::{SinkExt, StreamExt};
@@ -149,7 +149,7 @@ fn format_key_request_string(
     match signing_key {
         Some(signing_key) => format_onion_service_request_string(
             "ED25519-V3",
-            &signing_key.to_blob(),
+            &TorEd25519SigningKey::from(signing_key).to_blob(),
             virt_port,
             listen_address,
             transient,
@@ -194,7 +194,7 @@ fn parse_add_onion_response<'a>(
             Some(_) => {
                 let signing_key =
                     TorEd25519SigningKey::from_blob(captures.name("key_blob").unwrap().as_str());
-                let verifying_key = signing_key.verifying_key;
+                let verifying_key = signing_key.verifying_key();
                 (Some(signing_key), verifying_key)
             }
             None => {

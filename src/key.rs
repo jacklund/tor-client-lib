@@ -8,11 +8,6 @@ use ed25519_dalek::{
 use sha2::Sha512;
 use sha3::{Digest, Sha3_256};
 
-/// Trait to convert a key into a Tor blob
-pub trait Blobify {
-    fn to_blob(&self) -> String;
-}
-
 const TOR_VERSION: u8 = 3;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -98,18 +93,12 @@ impl TorServiceId {
     }
 }
 
-// It sucks to have to have a separate type for the ED25519 key returned by Tor, but
-// because of the fact that they don't return the original secret key, but instead return
-// the scalar and hash prefix, we can't retrieve the secret key from them, so we can't turn
-// this into a Dalek SigningKey. We can, however, retrieve the ExpandedSecretKey and from that the
-// VerifyingKey, which is enough to allow us to sign and verify.
-
-/// Ed25519 Signing key returned by Tor
+/// Ed25519 Signing key
 pub struct TorEd25519SigningKey {
-    pub tor_scalar: [u8; 32],
-    pub hash_prefix: [u8; 32],
-    pub expanded_secret_key: ExpandedSecretKey,
-    pub verifying_key: VerifyingKey,
+    tor_scalar: [u8; 32],
+    hash_prefix: [u8; 32],
+    expanded_secret_key: ExpandedSecretKey,
+    verifying_key: VerifyingKey,
 }
 
 impl TorEd25519SigningKey {
@@ -142,16 +131,42 @@ impl TorEd25519SigningKey {
         }
     }
 
+    pub fn verifying_key(&self) -> VerifyingKey {
+        self.verifying_key
+    }
+
     /// Verify a message against a signature
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), SignatureError> {
         self.verifying_key.verify(message, signature)
     }
+
+    pub fn to_blob(&self) -> String {
+        base64::encode(&[self.tor_scalar, self.hash_prefix].concat())
+    }
 }
 
-/// Convert the Tor key to a blob
-impl Blobify for TorEd25519SigningKey {
-    fn to_blob(&self) -> String {
-        base64::encode(&[self.tor_scalar, self.hash_prefix].concat())
+impl From<&DalekSigningKey> for TorEd25519SigningKey {
+    fn from(signing_key: &DalekSigningKey) -> Self {
+        // Hash the secret key
+        let hash = Sha512::default()
+            .chain_update(signing_key.to_bytes())
+            .finalize();
+
+        // Generate the scalar and the hash prefix from the hash
+        let mut scalar = [0u8; 32];
+        scalar.copy_from_slice(&hash);
+        let mut hash_prefix = [0u8; 32];
+        hash_prefix.copy_from_slice(&hash[32..]);
+
+        // Note: We don't do the mod multiplication for tor, just the clamping
+        scalar = clamp_integer(scalar);
+
+        Self {
+            tor_scalar: scalar,
+            hash_prefix,
+            expanded_secret_key: ExpandedSecretKey::from(&signing_key.to_bytes()),
+            verifying_key: signing_key.verifying_key(),
+        }
     }
 }
 
@@ -163,24 +178,6 @@ impl Signer<Signature> for TorEd25519SigningKey {
             message,
             &self.verifying_key,
         ))
-    }
-}
-
-impl Blobify for DalekSigningKey {
-    /// Convert a Dalek key to a blob to be used as the key for an Onion Service
-    fn to_blob(&self) -> String {
-        // Hash the secret key
-        let hash = Sha512::default().chain_update(self.to_bytes()).finalize();
-
-        // Generate the scalar and the hash prefix from the hash
-        let mut scalar = [0u8; 32];
-        scalar.copy_from_slice(&hash);
-        let mut hash_prefix = [0u8; 32];
-        hash_prefix.copy_from_slice(&hash[32..]);
-
-        // Note: We don't do the mod multiplication for tor, just the clamping
-        scalar = clamp_integer(scalar);
-        base64::encode(&[scalar, hash_prefix].concat())
     }
 }
 
