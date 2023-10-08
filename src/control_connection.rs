@@ -20,7 +20,7 @@ pub struct OnionService {
     pub listen_address: String,
     pub service_id: TorServiceId,
     pub address: String,
-    pub signing_key: Option<TorEd25519SigningKey>,
+    pub signing_key: TorEd25519SigningKey,
 }
 
 #[derive(Debug)]
@@ -189,13 +189,13 @@ fn parse_add_onion_response<'a>(
     // Retrieve the key, either the one passed in or the one
     // returned from the controller
     let (returned_signing_key, verifying_key) = match signing_key {
-        Some(signing_key) => (None, signing_key.verifying_key()),
+        Some(signing_key) => (signing_key.into(), signing_key.verifying_key()),
         None => match captures.name("key_type") {
             Some(_) => {
                 let signing_key =
                     TorEd25519SigningKey::from_blob(captures.name("key_blob").unwrap().as_str());
                 let verifying_key = signing_key.verifying_key();
-                (Some(signing_key), verifying_key)
+                (signing_key, verifying_key)
             }
             None => {
                 return Err(TorError::protocol_error(
