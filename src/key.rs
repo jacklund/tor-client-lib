@@ -5,12 +5,13 @@ use ed25519_dalek::{
     hazmat::{raw_sign, ExpandedSecretKey},
     Signature, SignatureError, Signer, SigningKey as DalekSigningKey, Verifier, VerifyingKey,
 };
+use serde::{Deserialize, Serialize};
 use sha2::Sha512;
 use sha3::{Digest, Sha3_256};
 
 const TOR_VERSION: u8 = 3;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TorServiceId {
     verifying_key: VerifyingKey,
     service_id: String,
