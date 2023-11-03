@@ -17,6 +17,12 @@ pub struct TorServiceId {
     service_id: String,
 }
 
+impl From<TorServiceId> for String {
+    fn from(id: TorServiceId) -> String {
+        id.service_id
+    }
+}
+
 /// Generate the Tor service ID from a verifying key
 /// From section 6 of rend-spec-v3.txt
 impl std::convert::From<VerifyingKey> for TorServiceId {
