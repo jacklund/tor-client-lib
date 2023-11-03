@@ -11,7 +11,7 @@ use sha3::{Digest, Sha3_256};
 
 const TOR_VERSION: u8 = 3;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Hash, Serialize, PartialEq, Eq)]
 pub struct TorServiceId {
     verifying_key: VerifyingKey,
     service_id: String,
