@@ -23,6 +23,12 @@ impl From<TorServiceId> for String {
     }
 }
 
+impl std::fmt::Display for TorServiceId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.service_id)
+    }
+}
+
 /// Generate the Tor service ID from a verifying key
 /// From section 6 of rend-spec-v3.txt
 impl std::convert::From<VerifyingKey> for TorServiceId {
