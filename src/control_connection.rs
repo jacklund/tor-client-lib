@@ -133,7 +133,7 @@ fn format_onion_service_request_string(
     listen_address: &str,
     transient: bool,
 ) -> String {
-    let flags = if transient { "Flags=Detach" } else { "" };
+    let flags = if transient { "" } else { "Flags=Detach" };
     format!(
         "{}:{} {} Port={},{}",
         key_type, key_blob, flags, virt_port, listen_address
