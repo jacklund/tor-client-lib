@@ -58,6 +58,23 @@ fn protocol_info(_args: HashMap<String, Value>, context: &mut Context) -> Result
     }
 }
 
+fn get_info(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
+    let connection: &mut TorControlConnection = match &mut context.connection {
+        Some(connection) => connection,
+        None => {
+            return Ok(Some(
+                "Error: you must connect first with the 'connect' command".to_string(),
+            ))
+        }
+    };
+
+    let info_type: String = args.get("info_type").unwrap().convert()?;
+    match RUNTIME.block_on(connection.get_info(&info_type)) {
+        Ok(tor_info) => Ok(Some(tor_info.reply)),
+        Err(error) => Ok(Some(format!("Error getting tor info: {}", error))),
+    }
+}
+
 fn authenticate(args: HashMap<String, Value>, context: &mut Context) -> Result<Option<String>> {
     let connection: &mut TorControlConnection = match &mut context.connection {
         Some(connection) => connection,
@@ -176,6 +193,11 @@ pub fn main() -> Result<()> {
                 .with_help("Authenticate to the Tor server using the specified auth method"),
         )
         .add_command(Command::new("protocol_info", protocol_info).with_help("Get protocol info"))
+        .add_command(
+            Command::new("get_info", get_info)
+                .with_parameter(Parameter::new("info_type").set_required(true)?)?
+                .with_help("Get tor info"),
+        )
         .add_command(
             Command::new("add_onion_service", add_onion_service)
                 .with_parameter(Parameter::new("virt_port").set_required(true)?)?

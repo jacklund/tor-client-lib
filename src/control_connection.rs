@@ -326,6 +326,10 @@ impl TorControlConnection {
         }
     }
 
+    pub async fn get_info(&mut self, info: &str) -> Result<ControlResponse, TorError> {
+        self.send_command("GETINFO", Some(info)).await
+    }
+
     /// Authenticate to the Tor server using the passed-in method
     pub async fn authenticate(&mut self, method: TorAuthentication) -> Result<(), TorError> {
         method.authenticate(self).await?;
