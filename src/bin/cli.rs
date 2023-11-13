@@ -184,7 +184,7 @@ pub fn main() -> Result<()> {
         .with_description("Run commands on a Tor server from the command line")
         .add_command(
             Command::new("connect", connect)
-                .with_parameter(Parameter::new("host_port").set_required(true)?)?
+                .with_parameter(Parameter::new("host_port").set_default("localhost:9051")?)?
                 .with_help("Connect to the Tor server at the given host and port"),
         )
         .add_command(
