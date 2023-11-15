@@ -1,11 +1,12 @@
 use crate::{base64, error::TorError};
 use base32::{self, Alphabet};
-use curve25519_dalek::{scalar::clamp_integer, Scalar};
+use curve25519_dalek::Scalar;
 use ed25519_dalek::{
     hazmat::{raw_sign, ExpandedSecretKey},
     Signature, SignatureError, Signer, SigningKey as DalekSigningKey, Verifier, VerifyingKey,
 };
 use serde::{Deserialize, Serialize};
+use serde_with::{serde_as, Bytes};
 use sha2::Sha512;
 use sha3::{Digest, Sha3_256};
 
@@ -107,17 +108,25 @@ impl TorServiceId {
 }
 
 /// Ed25519 Signing key
+#[serde_as]
+#[derive(Deserialize, Serialize)]
 pub struct TorEd25519SigningKey {
-    tor_scalar: [u8; 32],
-    hash_prefix: [u8; 32],
-    expanded_secret_key: ExpandedSecretKey,
-    verifying_key: VerifyingKey,
+    #[serde_as(as = "Bytes")]
+    blob: [u8; 64],
 }
 
 impl TorEd25519SigningKey {
+    fn expanded_secret_key(&self) -> ExpandedSecretKey {
+        ExpandedSecretKey::from_bytes(&self.blob)
+    }
+
+    pub fn verifying_key(&self) -> VerifyingKey {
+        VerifyingKey::from(&self.expanded_secret_key())
+    }
+
     /// Return the ED25519 scalar
     pub fn scalar(&self) -> Scalar {
-        Scalar::from_bytes_mod_order(self.tor_scalar)
+        Scalar::from_bytes_mod_order(self.blob[..32].try_into().unwrap())
     }
 
     /// Create the signing key from the key blob returned by the `ADD_ONION` call
@@ -125,60 +134,31 @@ impl TorEd25519SigningKey {
     pub fn from_blob(blob: &str) -> Self {
         // Decode the blob and turn it into the Dalek ExpandedSecretKey
         let blob = base64::decode(blob).unwrap();
-        let expanded_secret_key = ExpandedSecretKey::from_bytes(&blob.clone().try_into().unwrap());
-
-        // Extract the VerifyingKey from the ExpandedSecretKey
-        let verifying_key = VerifyingKey::from(&expanded_secret_key);
-
-        // Extract the tor scalar and hash prefix from the blob data
-        let mut tor_scalar: [u8; 32] = [0u8; 32];
-        tor_scalar.copy_from_slice(&blob[..32]);
-        let mut hash_prefix: [u8; 32] = [0u8; 32];
-        hash_prefix.copy_from_slice(&blob[32..]);
 
         Self {
-            tor_scalar,
-            hash_prefix,
-            expanded_secret_key,
-            verifying_key,
+            blob: blob.try_into().unwrap(),
         }
-    }
-
-    pub fn verifying_key(&self) -> VerifyingKey {
-        self.verifying_key
     }
 
     /// Verify a message against a signature
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), SignatureError> {
-        self.verifying_key.verify(message, signature)
+        self.verifying_key().verify(message, signature)
     }
 
     pub fn to_blob(&self) -> String {
-        base64::encode(&[self.tor_scalar, self.hash_prefix].concat())
+        base64::encode(&self.blob)
     }
 }
 
 impl From<&DalekSigningKey> for TorEd25519SigningKey {
     fn from(signing_key: &DalekSigningKey) -> Self {
         // Hash the secret key
-        let hash = Sha512::default()
+        let blob = Sha512::default()
             .chain_update(signing_key.to_bytes())
             .finalize();
 
-        // Generate the scalar and the hash prefix from the hash
-        let mut scalar = [0u8; 32];
-        scalar.copy_from_slice(&hash);
-        let mut hash_prefix = [0u8; 32];
-        hash_prefix.copy_from_slice(&hash[32..]);
-
-        // Note: We don't do the mod multiplication for tor, just the clamping
-        scalar = clamp_integer(scalar);
-
         Self {
-            tor_scalar: scalar,
-            hash_prefix,
-            expanded_secret_key: ExpandedSecretKey::from(&signing_key.to_bytes()),
-            verifying_key: signing_key.verifying_key(),
+            blob: blob.try_into().unwrap(),
         }
     }
 }
@@ -187,9 +167,9 @@ impl From<&DalekSigningKey> for TorEd25519SigningKey {
 impl Signer<Signature> for TorEd25519SigningKey {
     fn try_sign(&self, message: &[u8]) -> Result<Signature, SignatureError> {
         Ok(raw_sign::<Sha512>(
-            &self.expanded_secret_key,
+            &self.expanded_secret_key(),
             message,
-            &self.verifying_key,
+            &self.verifying_key(),
         ))
     }
 }
@@ -204,7 +184,7 @@ mod tests {
     fn test_ed25519v3_service_id() -> Result<(), anyhow::Error> {
         let base64_blob = "0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==";
         let signing_key = TorEd25519SigningKey::from_blob(base64_blob);
-        let public_key = signing_key.verifying_key;
+        let public_key = signing_key.verifying_key();
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",
             TorServiceId::from(public_key).as_str(),
