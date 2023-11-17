@@ -534,7 +534,6 @@ mod tests {
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
         let result = tor.authenticate(TorAuthentication::Null).await;
-        println!("{:?}", result);
         assert!(result.is_ok());
 
         let (client, server) = create_mock().await?;
