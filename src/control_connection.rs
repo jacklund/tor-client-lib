@@ -9,6 +9,7 @@ use lazy_static::lazy_static;
 use log::info;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio::{
     io::{ReadHalf, WriteHalf},
@@ -16,10 +17,10 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct OnionService {
     pub virt_port: u16,
-    pub listen_address: String,
+    pub listen_address: SocketAddr,
     pub service_id: TorServiceId,
     pub address: String,
     pub signing_key: TorEd25519SigningKey,
@@ -226,10 +227,18 @@ fn parse_add_onion_response(
         }
     };
 
+    let listen_address = match listen_address.parse() {
+        Ok(address) => address,
+        Err(error) => Err(TorError::protocol_error(&format!(
+            "Parse error parsing listen address '{}': {}",
+            listen_address, error
+        )))?,
+    };
+
     // Return the Onion Service
     Ok(OnionService {
         virt_port,
-        listen_address: listen_address.to_string(),
+        listen_address,
         service_id,
         address: format!("{}.onion:{}", hash_string, virt_port),
         signing_key: returned_signing_key,
@@ -596,10 +605,10 @@ mod tests {
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
         let onion_service = tor
-            .create_onion_service(8080, "localhost:8080", true, None)
+            .create_onion_service(8080, "127.0.0.1:8080", true, None)
             .await?;
         assert_eq!(8080, onion_service.virt_port);
-        assert_eq!("localhost:8080", onion_service.listen_address);
+        assert_eq!("127.0.0.1:8080".parse(), Ok(onion_service.listen_address));
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",
             onion_service.service_id.as_str()
