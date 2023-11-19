@@ -70,7 +70,7 @@ fn get_info(args: HashMap<String, Value>, context: &mut Context) -> Result<Optio
 
     let info_type: String = args.get("info_type").unwrap().convert()?;
     match RUNTIME.block_on(connection.get_info(&info_type)) {
-        Ok(tor_info) => Ok(Some(tor_info.reply)),
+        Ok(tor_info) => Ok(Some(format!("{:?}", tor_info))),
         Err(error) => Ok(Some(format!("Error getting tor info: {}", error))),
     }
 }

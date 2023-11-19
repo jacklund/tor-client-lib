@@ -41,7 +41,7 @@ impl std::convert::From<VerifyingKey> for TorServiceId {
 
         // Hash the verifying key concatenated with the checksum and the version
         let verifying_key_bytes = verifying_key.as_bytes();
-        let checksum = TorServiceId::calculate_checksum(&verifying_key_bytes.to_vec());
+        let checksum = TorServiceId::calculate_checksum(verifying_key_bytes.as_ref());
 
         // Base32 the verifying key concatenated with the checksum and the version
         let mut onion_bytes = verifying_key_bytes.to_vec();
@@ -91,7 +91,7 @@ impl std::str::FromStr for TorServiceId {
 impl TorServiceId {
     fn calculate_checksum(verifying_key_bytes: &[u8]) -> [u8; 2] {
         let mut checksum_bytes = ".onion checksum".as_bytes().to_vec();
-        checksum_bytes.extend_from_slice(&verifying_key_bytes);
+        checksum_bytes.extend_from_slice(verifying_key_bytes);
         checksum_bytes.extend_from_slice(&[TOR_VERSION]);
         let mut checksum = [0u8; 2];
         checksum

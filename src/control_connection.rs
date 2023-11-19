@@ -178,8 +178,8 @@ fn parse_required_response_field<'a>(
     }
 }
 
-fn parse_add_onion_response<'a>(
-    captures: &Captures<'a>,
+fn parse_add_onion_response(
+    captures: &Captures<'_>,
     virt_port: u16,
     listen_address: &str,
     signing_key: Option<&SigningKey>,
@@ -328,8 +328,40 @@ impl TorControlConnection {
         }
     }
 
-    pub async fn get_info(&mut self, info: &str) -> Result<ControlResponse, TorError> {
-        self.send_command("GETINFO", Some(info)).await
+    pub async fn get_info(&mut self, info: &str) -> Result<Vec<String>, TorError> {
+        let control_response = self.send_command("GETINFO", Some(info)).await?;
+        info!(
+            "Send GETINFO command, got control response {:?}",
+            control_response
+        );
+        if control_response.status_code != 250 {
+            return Err(TorError::protocol_error(&format!(
+                "Expected status code 250, got {}",
+                control_response.status_code
+            )));
+        }
+        let split_response = &control_response
+            .reply
+            .trim_end()
+            .split('=')
+            .collect::<Vec<&str>>();
+        if split_response.len() <= 1 {
+            return Err(TorError::protocol_error(&format!(
+                "Got unexpected reply '{}', expected key/value pair",
+                control_response.reply
+            )));
+        }
+
+        let response = split_response[1].split('\n').collect::<Vec<&str>>();
+
+        let mut ret = Vec::new();
+        for value in response.iter() {
+            if !value.is_empty() {
+                ret.push(value.to_string());
+            }
+        }
+
+        Ok(ret)
     }
 
     /// Authenticate to the Tor server using the passed-in method
