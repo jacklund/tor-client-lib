@@ -111,7 +111,7 @@ impl TorServiceId {
 
 /// Ed25519 Signing key
 #[serde_as]
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TorEd25519SigningKey {
     #[serde_as(as = "Base64")]
     blob: [u8; 64],

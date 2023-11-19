@@ -16,7 +16,7 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OnionService {
     pub virt_port: u16,
     pub listen_address: String,
