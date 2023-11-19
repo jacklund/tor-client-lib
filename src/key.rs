@@ -6,7 +6,7 @@ use ed25519_dalek::{
     Signature, SignatureError, Signer, SigningKey as DalekSigningKey, Verifier, VerifyingKey,
 };
 use serde::{Deserialize, Serialize};
-use serde_with::{base64::Base64, serde_as, Bytes};
+use serde_with::{base64::Base64, serde_as};
 use sha2::Sha512;
 use sha3::{Digest, Sha3_256};
 
@@ -113,7 +113,7 @@ impl TorServiceId {
 #[serde_as]
 #[derive(Clone, Deserialize, Serialize)]
 pub struct TorEd25519SigningKey {
-    #[serde_as(as = "Bytes")]
+    #[serde_as(as = "Base64")]
     blob: [u8; 64],
 }
 
