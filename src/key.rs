@@ -142,6 +142,11 @@ impl TorEd25519SigningKey {
         }
     }
 
+    /// Convert from raw bytes to the SigningKey
+    pub fn from_bytes(bytes: [u8; 64]) -> Self {
+        Self { blob: bytes }
+    }
+
     /// Verify a message against a signature
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), SignatureError> {
         self.verifying_key().verify(message, signature)
@@ -149,6 +154,10 @@ impl TorEd25519SigningKey {
 
     pub fn to_blob(&self) -> String {
         base64::encode(&self.blob)
+    }
+
+    pub fn to_bytes(&self) -> [u8; 64] {
+        self.blob
     }
 }
 
