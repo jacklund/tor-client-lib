@@ -2,6 +2,8 @@ use lazy_static::lazy_static;
 use repl_rs::{Command, Parameter, Result, Value};
 use repl_rs::{Convert, Repl};
 use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::str::FromStr;
 use tokio::runtime::Runtime;
 use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
 
@@ -133,19 +135,18 @@ fn add_onion_service(
     };
 
     match RUNTIME.block_on(connection.create_onion_service(
-        virt_port,
-        &listen_address,
+        &[(virt_port, SocketAddr::from_str(&listen_address).unwrap()).into()],
         transient,
         None,
     )) {
         Ok(service) => {
             println!(
                 "public key: {}",
-                hex::encode(service.signing_key.verifying_key().as_bytes())
+                hex::encode(service.signing_key().verifying_key().as_bytes())
             );
             Ok(Some(format!(
                 "Onion service with service ID '{}' created",
-                service.service_id.as_str()
+                service.service_id().as_str()
             )))
         }
         Err(error) => Ok(Some(format!("Error creating onion service: {}", error))),

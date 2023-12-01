@@ -9,7 +9,7 @@ use lazy_static::lazy_static;
 use log::info;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::str::FromStr;
 use tokio::{
     io::{ReadHalf, WriteHalf},
@@ -17,17 +17,103 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OnionServicePort {
+    virt_port: u16,
+    listen_address: SocketAddr,
+}
+
+impl OnionServicePort {
+    pub fn new(virt_port: u16, listen_address: Option<SocketAddr>) -> Self {
+        Self {
+            virt_port,
+            listen_address: match listen_address {
+                None => SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), virt_port),
+                Some(a) => a,
+            },
+        }
+    }
+}
+
+impl From<(u16, SocketAddr)> for OnionServicePort {
+    fn from(pair: (u16, SocketAddr)) -> Self {
+        Self::new(pair.0, Some(pair.1))
+    }
+}
+
+pub struct OnionServiceBuilder {
+    ports: Vec<OnionServicePort>,
+    service_id: TorServiceId,
+    signing_key: TorEd25519SigningKey,
+}
+
+impl OnionServiceBuilder {
+    pub fn new<S, K>(id: S, key: K) -> Self
+    where
+        TorServiceId: From<S>,
+        TorEd25519SigningKey: From<K>,
+    {
+        Self {
+            ports: Vec::new(),
+            service_id: id.into(),
+            signing_key: key.into(),
+        }
+    }
+
+    pub fn add_port(mut self, port: OnionServicePort) -> Self {
+        self.ports.push(port);
+        self
+    }
+
+    pub fn build(self) -> OnionService {
+        OnionService {
+            ports: self.ports,
+            service_id: self.service_id,
+            signing_key: self.signing_key,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OnionService {
-    pub virt_port: u16,
-    pub listen_address: SocketAddr,
-    pub service_id: TorServiceId,
-    pub signing_key: TorEd25519SigningKey,
+    ports: Vec<OnionServicePort>,
+    service_id: TorServiceId,
+    signing_key: TorEd25519SigningKey,
 }
 
 impl OnionService {
-    pub fn address(&self) -> String {
-        format!("{}.onion:{}", self.service_id, self.virt_port)
+    pub fn new<S, K>(id: S, key: K, ports: &[OnionServicePort]) -> Self
+    where
+        TorServiceId: From<S>,
+        TorEd25519SigningKey: From<K>,
+    {
+        Self {
+            ports: ports.to_vec(),
+            service_id: id.into(),
+            signing_key: key.into(),
+        }
+    }
+
+    pub fn addresses(&self) -> Vec<String> {
+        self.ports
+            .iter()
+            .map(|p| format!("{}.onion:{}", self.service_id, p.virt_port))
+            .collect()
+    }
+
+    pub fn address(&self, port: u16) -> Option<String> {
+        self.ports
+            .iter()
+            .find(|p| p.virt_port == port)
+            .map(|p| format!("{}.onion:{}", self.service_id, p.virt_port))
+    }
+
+    pub fn service_id(&self) -> &TorServiceId {
+        &self.service_id
+    }
+
+    pub fn signing_key(&self) -> &TorEd25519SigningKey {
+        &self.signing_key
     }
 }
 
@@ -137,20 +223,20 @@ async fn read_line<S: StreamExt<Item = Result<String, LinesCodecError>> + Unpin>
 fn format_onion_service_request_string(
     key_type: &str,
     key_blob: &str,
-    virt_port: u16,
-    listen_address: &str,
+    ports: &[OnionServicePort],
     transient: bool,
 ) -> String {
     let flags = if transient { "" } else { "Flags=Detach" };
-    format!(
-        "{}:{} {} Port={},{}",
-        key_type, key_blob, flags, virt_port, listen_address
-    )
+    let port_string = ports
+        .iter()
+        .map(|p| format!("Port={},{}", p.virt_port, p.listen_address))
+        .collect::<Vec<String>>()
+        .join(" ");
+    format!("{}:{} {} {}", key_type, key_blob, flags, port_string)
 }
 
 fn format_key_request_string(
-    virt_port: u16,
-    listen_address: &str,
+    ports: &[OnionServicePort],
     transient: bool,
     signing_key: Option<&SigningKey>,
 ) -> String {
@@ -158,13 +244,10 @@ fn format_key_request_string(
         Some(signing_key) => format_onion_service_request_string(
             "ED25519-V3",
             &TorEd25519SigningKey::from(signing_key).to_blob(),
-            virt_port,
-            listen_address,
+            ports,
             transient,
         ),
-        None => {
-            format_onion_service_request_string("NEW", "BEST", virt_port, listen_address, transient)
-        }
+        None => format_onion_service_request_string("NEW", "BEST", ports, transient),
     }
 }
 
@@ -186,8 +269,7 @@ fn parse_required_response_field<'a>(
 
 fn parse_add_onion_response(
     captures: &Captures<'_>,
-    virt_port: u16,
-    listen_address: &str,
+    ports: &[OnionServicePort],
     signing_key: Option<&SigningKey>,
 ) -> Result<OnionService, TorError> {
     // Parse the Hash value
@@ -232,21 +314,8 @@ fn parse_add_onion_response(
         }
     };
 
-    let listen_address = match listen_address.parse() {
-        Ok(address) => address,
-        Err(error) => Err(TorError::protocol_error(&format!(
-            "Parse error parsing listen address '{}': {}",
-            listen_address, error
-        )))?,
-    };
-
     // Return the Onion Service
-    Ok(OnionService {
-        virt_port,
-        listen_address,
-        service_id,
-        signing_key: returned_signing_key,
-    })
+    Ok(OnionService::new(service_id, returned_signing_key, ports))
 }
 
 /// ProtocolInfo struct, contains information from the response to the
@@ -407,14 +476,12 @@ impl TorControlConnection {
     /// Create an onion service.
     pub async fn create_onion_service(
         &mut self,
-        virt_port: u16,
-        listen_address: &str,
+        ports: &[OnionServicePort],
         transient: bool,
         signing_key: Option<&SigningKey>,
     ) -> Result<OnionService, TorError> {
         // Create the request string from the arguments
-        let request_string =
-            format_key_request_string(virt_port, listen_address, transient, signing_key);
+        let request_string = format_key_request_string(ports, transient, signing_key);
 
         // Send command to Tor controller
         let control_response = self
@@ -439,9 +506,7 @@ impl TorControlConnection {
                     .unwrap();
         }
         match RE.captures(&control_response.reply) {
-            Some(captures) => {
-                parse_add_onion_response(&captures, virt_port, listen_address, signing_key)
-            }
+            Some(captures) => parse_add_onion_response(&captures, ports, signing_key),
             None => Err(TorError::ProtocolError(format!(
                 "Unexpected response: {} {}",
                 control_response.status_code, control_response.reply,
@@ -609,17 +674,20 @@ mod tests {
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
         let onion_service = tor
-            .create_onion_service(8080, "127.0.0.1:8080", true, None)
+            .create_onion_service(&[OnionServicePort::new(8080, None)], true, None)
             .await?;
-        assert_eq!(8080, onion_service.virt_port);
-        assert_eq!("127.0.0.1:8080".parse(), Ok(onion_service.listen_address));
+        assert_eq!(8080, onion_service.ports[0].virt_port);
+        assert_eq!(
+            "127.0.0.1:8080".parse(),
+            Ok(onion_service.ports[0].listen_address)
+        );
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",
             onion_service.service_id.as_str()
         );
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad.onion:8080",
-            onion_service.address()
+            onion_service.address(8080).unwrap()
         );
         Ok(())
     }

@@ -113,12 +113,14 @@ impl TorServiceId {
     }
 }
 
+pub type TorBlob = [u8; 64];
+
 /// Ed25519 Signing key
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct TorEd25519SigningKey {
     #[serde_as(as = "Base64")]
-    blob: [u8; 64],
+    blob: TorBlob,
 }
 
 impl TorEd25519SigningKey {
@@ -162,6 +164,12 @@ impl TorEd25519SigningKey {
 
     pub fn to_bytes(&self) -> [u8; 64] {
         self.blob
+    }
+}
+
+impl From<TorBlob> for TorEd25519SigningKey {
+    fn from(blob: TorBlob) -> Self {
+        Self { blob }
     }
 }
 
