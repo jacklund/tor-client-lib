@@ -22,8 +22,13 @@ pub struct OnionService {
     pub virt_port: u16,
     pub listen_address: SocketAddr,
     pub service_id: TorServiceId,
-    pub address: String,
     pub signing_key: TorEd25519SigningKey,
+}
+
+impl OnionService {
+    pub fn address(&self) -> String {
+        format!("{}.onion:{}", self.service_id, self.virt_port)
+    }
 }
 
 #[derive(Debug)]
@@ -240,7 +245,6 @@ fn parse_add_onion_response(
         virt_port,
         listen_address,
         service_id,
-        address: format!("{}.onion:{}", hash_string, virt_port),
         signing_key: returned_signing_key,
     })
 }
@@ -615,7 +619,7 @@ mod tests {
         );
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad.onion:8080",
-            onion_service.address
+            onion_service.address()
         );
         Ok(())
     }

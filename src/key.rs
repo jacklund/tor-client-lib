@@ -107,6 +107,10 @@ impl TorServiceId {
     pub fn as_str(&self) -> &str {
         &self.service_id
     }
+
+    pub fn onion_hostname(&self) -> String {
+        format!("{}.onion", self.service_id)
+    }
 }
 
 /// Ed25519 Signing key
