@@ -9,35 +9,108 @@ use lazy_static::lazy_static;
 use log::info;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::fmt::{Display, Error, Formatter};
+use std::net::{AddrParseError, SocketAddr};
+use std::os::unix::net::SocketAddr as UnixSocketAddr;
+use std::path::Path;
 use std::str::FromStr;
 use tokio::{
     io::{ReadHalf, WriteHalf},
-    net::{TcpStream, ToSocketAddrs},
+    net::{TcpListener, TcpStream, ToSocketAddrs, UnixListener},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct OnionServicePort {
-    virt_port: u16,
-    listen_address: SocketAddr,
+#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
+pub enum ListenAddress {
+    Tcp(SocketAddr),
+    Unix(String),
 }
 
-impl OnionServicePort {
-    pub fn new(virt_port: u16, listen_address: Option<SocketAddr>) -> Self {
-        Self {
-            virt_port,
-            listen_address: match listen_address {
-                None => SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), virt_port),
-                Some(a) => a,
-            },
+impl ListenAddress {
+    fn from_tcp_string(address: &str) -> Result<Self, AddrParseError> {
+        Ok(Self::Tcp(SocketAddr::from_str(address)?))
+    }
+
+    fn from_unix_string<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
+        Ok(Self::Unix(
+            UnixSocketAddr::from_pathname(path)?
+                .as_pathname()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_string(),
+        ))
+    }
+
+    pub async fn listener(&self) -> Result<OnionServiceListener, std::io::Error> {
+        match self {
+            Self::Tcp(address) => Ok(OnionServiceListener::Tcp(TcpListener::bind(address).await?)),
+            Self::Unix(path) => Ok(OnionServiceListener::Unix(UnixListener::bind(path)?)),
         }
     }
 }
 
-impl From<(u16, SocketAddr)> for OnionServicePort {
-    fn from(pair: (u16, SocketAddr)) -> Self {
-        Self::new(pair.0, Some(pair.1))
+impl Display for ListenAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        match self {
+            Self::Tcp(sock_addr) => write!(f, "{}", sock_addr),
+            Self::Unix(string) => write!(f, "unix:{}", string),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ListenAddressParseError {
+    TcpParseError(AddrParseError),
+    UnixParseError(std::io::Error),
+}
+
+impl From<AddrParseError> for ListenAddressParseError {
+    fn from(err: AddrParseError) -> Self {
+        Self::TcpParseError(err)
+    }
+}
+
+impl From<std::io::Error> for ListenAddressParseError {
+    fn from(err: std::io::Error) -> Self {
+        Self::UnixParseError(err)
+    }
+}
+
+impl FromStr for ListenAddress {
+    type Err = ListenAddressParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.starts_with("unix:") {
+            Ok(Self::from_unix_string(&s[5..])?)
+        } else {
+            Ok(Self::from_tcp_string(s)?)
+        }
+    }
+}
+
+pub enum OnionServiceListener {
+    Tcp(TcpListener),
+    Unix(UnixListener),
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct OnionServicePort {
+    virt_port: u16,
+    listen_address: ListenAddress,
+}
+
+impl OnionServicePort {
+    pub fn new(virt_port: u16, listen_address: Option<ListenAddress>) -> Self {
+        Self {
+            virt_port,
+            listen_address: match listen_address {
+                None => {
+                    ListenAddress::from_tcp_string(&format!("127.0.0.1:{}", virt_port)).unwrap()
+                }
+                Some(a) => a,
+            },
+        }
     }
 }
 
@@ -678,8 +751,8 @@ mod tests {
             .await?;
         assert_eq!(8080, onion_service.ports[0].virt_port);
         assert_eq!(
-            "127.0.0.1:8080".parse(),
-            Ok(onion_service.ports[0].listen_address)
+            ListenAddress::from_tcp_string("127.0.0.1:8080"),
+            Ok(onion_service.ports[0].clone().listen_address)
         );
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",

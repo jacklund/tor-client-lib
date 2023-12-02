@@ -2,10 +2,12 @@ use lazy_static::lazy_static;
 use repl_rs::{Command, Parameter, Result, Value};
 use repl_rs::{Convert, Repl};
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::str::FromStr;
 use tokio::runtime::Runtime;
-use tor_client_lib::{auth::TorAuthentication, control_connection::TorControlConnection};
+use tor_client_lib::{
+    auth::TorAuthentication,
+    control_connection::{ListenAddress, OnionServicePort, TorControlConnection},
+};
 
 lazy_static! {
     static ref RUNTIME: Runtime = Runtime::new().unwrap();
@@ -135,7 +137,10 @@ fn add_onion_service(
     };
 
     match RUNTIME.block_on(connection.create_onion_service(
-        &[(virt_port, SocketAddr::from_str(&listen_address).unwrap()).into()],
+        &[OnionServicePort::new(
+            virt_port,
+            Some(ListenAddress::from_str(&listen_address).unwrap()),
+        )],
         transient,
         None,
     )) {
