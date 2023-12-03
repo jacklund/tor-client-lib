@@ -16,7 +16,7 @@ use std::path::Path;
 use std::str::FromStr;
 use tokio::{
     io::{ReadHalf, WriteHalf},
-    net::{TcpListener, TcpStream, ToSocketAddrs, UnixListener},
+    net::{TcpListener, TcpStream, ToSocketAddrs, UnixListener, UnixStream},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
@@ -40,13 +40,6 @@ impl ListenAddress {
                 .unwrap()
                 .to_string(),
         ))
-    }
-
-    pub async fn listener(&self) -> Result<OnionServiceListener, std::io::Error> {
-        match self {
-            Self::Tcp(address) => Ok(OnionServiceListener::Tcp(TcpListener::bind(address).await?)),
-            Self::Unix(path) => Ok(OnionServiceListener::Unix(UnixListener::bind(path)?)),
-        }
     }
 }
 
@@ -103,6 +96,27 @@ impl FromStr for ListenAddress {
 pub enum OnionServiceListener {
     Tcp(TcpListener),
     Unix(UnixListener),
+}
+
+impl OnionServiceListener {
+    pub async fn bind(address: &ListenAddress) -> Result<Self, std::io::Error> {
+        match address {
+            ListenAddress::Tcp(address) => Ok(Self::Tcp(TcpListener::bind(address).await?)),
+            ListenAddress::Unix(path) => Ok(Self::Unix(UnixListener::bind(path)?)),
+        }
+    }
+
+    pub async fn accept(&self) -> Result<OnionServiceStream, std::io::Error> {
+        match self {
+            Self::Tcp(listener) => Ok(OnionServiceStream::Tcp(listener.accept().await?.0)),
+            Self::Unix(listener) => Ok(OnionServiceStream::Unix(listener.accept().await?.0)),
+        }
+    }
+}
+
+pub enum OnionServiceStream {
+    Tcp(TcpStream),
+    Unix(UnixStream),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
