@@ -65,6 +65,17 @@ pub enum ListenAddressParseError {
     UnixParseError(std::io::Error),
 }
 
+impl std::error::Error for ListenAddressParseError {}
+
+impl Display for ListenAddressParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        match self {
+            Self::TcpParseError(error) => write!(f, "Error parsing TCP address: {}", error),
+            Self::UnixParseError(error) => write!(f, "Error parsing Unix address:{}", error),
+        }
+    }
+}
+
 impl From<AddrParseError> for ListenAddressParseError {
     fn from(err: AddrParseError) -> Self {
         Self::TcpParseError(err)
