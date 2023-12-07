@@ -16,7 +16,7 @@ use std::path::Path;
 use std::str::FromStr;
 use tokio::{
     io::{ReadHalf, WriteHalf},
-    net::{TcpListener, TcpStream, ToSocketAddrs, UnixListener, UnixStream},
+    net::{TcpStream, ToSocketAddrs},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
@@ -85,38 +85,12 @@ impl FromStr for ListenAddress {
     type Err = ListenAddressParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.starts_with("unix:") {
-            Ok(Self::from_unix_string(&s[5..])?)
+        if let Some(path) = s.strip_prefix("unix:") {
+            Ok(Self::from_unix_string(path)?)
         } else {
             Ok(Self::from_tcp_string(s)?)
         }
     }
-}
-
-pub enum OnionServiceListener {
-    Tcp(TcpListener),
-    Unix(UnixListener),
-}
-
-impl OnionServiceListener {
-    pub async fn bind(address: &ListenAddress) -> Result<Self, std::io::Error> {
-        match address {
-            ListenAddress::Tcp(address) => Ok(Self::Tcp(TcpListener::bind(address).await?)),
-            ListenAddress::Unix(path) => Ok(Self::Unix(UnixListener::bind(path)?)),
-        }
-    }
-
-    pub async fn accept(&self) -> Result<OnionServiceStream, std::io::Error> {
-        match self {
-            Self::Tcp(listener) => Ok(OnionServiceStream::Tcp(listener.accept().await?.0)),
-            Self::Unix(listener) => Ok(OnionServiceStream::Unix(listener.accept().await?.0)),
-        }
-    }
-}
-
-pub enum OnionServiceStream {
-    Tcp(TcpStream),
-    Unix(UnixStream),
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -135,39 +109,6 @@ impl OnionServicePort {
                 }
                 Some(a) => a,
             },
-        }
-    }
-}
-
-pub struct OnionServiceBuilder {
-    ports: Vec<OnionServicePort>,
-    service_id: TorServiceId,
-    signing_key: TorEd25519SigningKey,
-}
-
-impl OnionServiceBuilder {
-    pub fn new<S, K>(id: S, key: K) -> Self
-    where
-        TorServiceId: From<S>,
-        TorEd25519SigningKey: From<K>,
-    {
-        Self {
-            ports: Vec::new(),
-            service_id: id.into(),
-            signing_key: key.into(),
-        }
-    }
-
-    pub fn add_port(mut self, port: OnionServicePort) -> Self {
-        self.ports.push(port);
-        self
-    }
-
-    pub fn build(self) -> OnionService {
-        OnionService {
-            ports: self.ports,
-            service_id: self.service_id,
-            signing_key: self.signing_key,
         }
     }
 }
@@ -192,18 +133,32 @@ impl OnionService {
         }
     }
 
-    pub fn addresses(&self) -> Vec<String> {
+    pub fn listen_addresses_for_onion_address(&self, onion_address: &str) -> Vec<ListenAddress> {
         self.ports
             .iter()
-            .map(|p| format!("{}.onion:{}", self.service_id, p.virt_port))
+            .map(|p| (p, format!("{}.onion:{}", self.service_id, p.virt_port)))
+            .filter(|(_p, a)| a == onion_address)
+            .map(|(p, _a)| p.listen_address.clone())
             .collect()
     }
 
-    pub fn address(&self, port: u16) -> Option<String> {
+    pub fn listen_addresses_for_port(&self, service_port: u16) -> Vec<ListenAddress> {
         self.ports
             .iter()
-            .find(|p| p.virt_port == port)
-            .map(|p| format!("{}.onion:{}", self.service_id, p.virt_port))
+            .filter(|p| p.virt_port == service_port)
+            .map(|p| p.listen_address.clone())
+            .collect()
+    }
+
+    pub fn onion_address(&self, service_port: u16) -> Result<String, TorError> {
+        if self.ports.iter().any(|p| p.virt_port == service_port) {
+            Ok(format!("{}.onion:{}", self.service_id, service_port))
+        } else {
+            Err(TorError::protocol_error(&format!(
+                "No Onion Service Port {} found for onion service {}",
+                service_port, self.service_id
+            )))
+        }
     }
 
     pub fn service_id(&self) -> &TorServiceId {
@@ -785,7 +740,7 @@ mod tests {
         );
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad.onion:8080",
-            onion_service.address(8080).unwrap()
+            onion_service.onion_address(8080).unwrap()
         );
         Ok(())
     }
