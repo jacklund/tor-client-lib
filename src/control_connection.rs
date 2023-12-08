@@ -119,6 +119,23 @@ pub struct OnionAddress {
     service_port: u16,
 }
 
+impl OnionAddress {
+    pub fn new(service_id: TorServiceId, port: u16) -> Self {
+        Self {
+            service_id,
+            service_port: port,
+        }
+    }
+
+    pub fn service_id(&self) -> &TorServiceId {
+        &self.service_id
+    }
+
+    pub fn service_port(&self) -> u16 {
+        self.service_port
+    }
+}
+
 impl FromStr for OnionAddress {
     type Err = TorError;
 
@@ -211,6 +228,13 @@ impl OnionService {
                 service_port, self.service_id
             )))
         }
+    }
+
+    pub fn onion_addresses(&self) -> Vec<OnionAddress> {
+        self.ports
+            .iter()
+            .map(|p| OnionAddress::new(self.service_id.clone(), p.virt_port))
+            .collect()
     }
 
     pub fn service_id(&self) -> &TorServiceId {
