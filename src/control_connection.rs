@@ -113,55 +113,46 @@ impl OnionServicePort {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub struct OnionAddress {
-    service_id: String,
+    service_id: TorServiceId,
     service_port: u16,
 }
 
-#[derive(Debug)]
-pub enum OnionAddressParseError {
-    HostParseError(String),
-    PortParseError(std::num::ParseIntError),
-}
-
-impl Display for OnionAddressParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        match self {
-            Self::HostParseError(error) => write!(f, "Error parsing onion host: {}", error),
-            Self::PortParseError(error) => write!(f, "Error parsing onion port:{}", error),
-        }
-    }
-}
-
-lazy_static! {
-    static ref ONION_ADDRESS_REGEX: Regex =
-        Regex::new(r"^(?P<service_id>[a-z2-7]{56}).onion:(?P<service_port>.*)$").unwrap();
-}
-
-impl std::error::Error for OnionAddressParseError {}
-
 impl FromStr for OnionAddress {
-    type Err = OnionAddressParseError;
+    type Err = TorError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match ONION_ADDRESS_REGEX.captures(s) {
-            Some(captures) => {
-                let service_id = captures["service_id"].to_string();
-                let service_port = match captures["service_port"].parse::<u16>() {
-                    Ok(port) => port,
-                    Err(error) => return Err(Self::Err::PortParseError(error)),
-                };
-                Ok(Self {
-                    service_id,
-                    service_port,
-                })
-            }
-            None => Err(Self::Err::HostParseError(format!(
-                "Error parsing onion address '{}'",
-                s
-            ))),
+        let values = s.split(':').collect::<Vec<&str>>();
+        if values.len() != 2 {
+            return Err(TorError::protocol_error("Bad onion address"));
         }
+        let host_values = values[0].split('.').collect::<Vec<&str>>();
+        if host_values.len() != 2 || host_values[1] != "onion" {
+            return Err(TorError::protocol_error("Bad onion address"));
+        }
+        let service_id = match TorServiceId::from_str(host_values[0]) {
+            Ok(id) => id,
+            Err(error) => {
+                return Err(TorError::protocol_error(&format!(
+                    "Error parsing host field in onion address: {}",
+                    error
+                )));
+            }
+        };
+        let service_port = match values[1].parse::<u16>() {
+            Ok(port) => port,
+            Err(error) => {
+                return Err(TorError::protocol_error(&format!(
+                    "Error parsing port field in onion address: {}",
+                    error
+                )));
+            }
+        };
+        Ok(Self {
+            service_id,
+            service_port,
+        })
     }
 }
 
@@ -208,9 +199,12 @@ impl OnionService {
             .collect()
     }
 
-    pub fn onion_address(&self, service_port: u16) -> Result<String, TorError> {
+    pub fn onion_address(&self, service_port: u16) -> Result<OnionAddress, TorError> {
         if self.ports.iter().any(|p| p.virt_port == service_port) {
-            Ok(format!("{}.onion:{}", self.service_id, service_port))
+            Ok(OnionAddress {
+                service_id: self.service_id.clone(),
+                service_port,
+            })
         } else {
             Err(TorError::protocol_error(&format!(
                 "No Onion Service Port {} found for onion service {}",
@@ -797,7 +791,9 @@ mod tests {
             onion_service.service_id.as_str()
         );
         assert_eq!(
-            "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad.onion:8080",
+            OnionAddress::from_str(
+                "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad.onion:8080"
+            )?,
             onion_service.onion_address(8080).unwrap()
         );
         Ok(())
@@ -823,7 +819,7 @@ mod tests {
             "647qjf6w3evdbdpy7oidf5vda6rsjzsl5a6ofsaou2v77hj7dmn2spqd.onion:80",
         )?;
         assert_eq!(
-            "647qjf6w3evdbdpy7oidf5vda6rsjzsl5a6ofsaou2v77hj7dmn2spqd",
+            TorServiceId::from_str("647qjf6w3evdbdpy7oidf5vda6rsjzsl5a6ofsaou2v77hj7dmn2spqd")?,
             address.service_id
         );
         assert_eq!(80, address.service_port);
