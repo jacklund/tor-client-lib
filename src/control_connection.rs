@@ -113,6 +113,64 @@ impl OnionServicePort {
     }
 }
 
+#[derive(Debug)]
+pub struct OnionAddress {
+    service_id: String,
+    service_port: u16,
+}
+
+#[derive(Debug)]
+pub enum OnionAddressParseError {
+    HostParseError(String),
+    PortParseError(std::num::ParseIntError),
+}
+
+impl Display for OnionAddressParseError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        match self {
+            Self::HostParseError(error) => write!(f, "Error parsing onion host: {}", error),
+            Self::PortParseError(error) => write!(f, "Error parsing onion port:{}", error),
+        }
+    }
+}
+
+lazy_static! {
+    static ref ONION_ADDRESS_REGEX: Regex =
+        Regex::new(r"^(?P<service_id>[a-z2-7]{56}).onion:(?P<service_port>.*)$").unwrap();
+}
+
+impl std::error::Error for OnionAddressParseError {}
+
+impl FromStr for OnionAddress {
+    type Err = OnionAddressParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match ONION_ADDRESS_REGEX.captures(s) {
+            Some(captures) => {
+                let service_id = captures["service_id"].to_string();
+                let service_port = match captures["service_port"].parse::<u16>() {
+                    Ok(port) => port,
+                    Err(error) => return Err(Self::Err::PortParseError(error)),
+                };
+                Ok(Self {
+                    service_id,
+                    service_port,
+                })
+            }
+            None => Err(Self::Err::HostParseError(format!(
+                "Error parsing onion address '{}'",
+                s
+            ))),
+        }
+    }
+}
+
+impl Display for OnionAddress {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
+        write!(f, "{}:{}", self.service_id, self.service_port)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct OnionService {
     ports: Vec<OnionServicePort>,
@@ -755,6 +813,30 @@ mod tests {
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
         tor.get_protocol_info().await?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_parse_onion_address() -> Result<(), Box<dyn std::error::Error>> {
+        let address = OnionAddress::from_str(
+            "647qjf6w3evdbdpy7oidf5vda6rsjzsl5a6ofsaou2v77hj7dmn2spqd.onion:80",
+        )?;
+        assert_eq!(
+            "647qjf6w3evdbdpy7oidf5vda6rsjzsl5a6ofsaou2v77hj7dmn2spqd",
+            address.service_id
+        );
+        assert_eq!(80, address.service_port);
+
+        if let Ok(_) = OnionAddress::from_str("foobar:27") {
+            assert!(false);
+        }
+
+        if let Ok(_) = OnionAddress::from_str(
+            "647qjf6w3evdbdpy7oidf5vda6rsjzsl5a6ofsaou2v77hj7dmn2spqd.onion:abcd",
+        ) {
+            assert!(false);
+        }
 
         Ok(())
     }
