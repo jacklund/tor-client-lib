@@ -44,7 +44,7 @@ impl ListenAddress {
         ))
     }
 
-    pub async fn bind(&self) -> Result<OnionServiceListener, Box<dyn std::error::Error>> {
+    pub async fn bind(&self) -> Result<OnionServiceListener, std::io::Error> {
         match self {
             Self::Tcp(socket_addr) => Ok(OnionServiceListener::Tcp(
                 TcpListener::bind(socket_addr).await?,
@@ -110,7 +110,7 @@ pub enum OnionServiceListener {
 }
 
 impl OnionServiceListener {
-    pub async fn accept(&self) -> Result<OnionServiceStream, Box<dyn std::error::Error>> {
+    pub async fn accept(&self) -> Result<OnionServiceStream, std::io::Error> {
         match self {
             Self::Tcp(listener) => Ok(OnionServiceStream::Tcp(listener.accept().await?.0)),
             Self::Unix(listener) => Ok(OnionServiceStream::Unix(listener.accept().await?.0)),
