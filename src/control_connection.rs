@@ -13,10 +13,12 @@ use std::fmt::{Display, Error, Formatter};
 use std::net::{AddrParseError, SocketAddr};
 use std::os::unix::net::SocketAddr as UnixSocketAddr;
 use std::path::Path;
+use std::pin::Pin;
 use std::str::FromStr;
+use std::task::{Context, Poll};
 use tokio::{
-    io::{ReadHalf, WriteHalf},
-    net::{TcpStream, ToSocketAddrs},
+    io::{AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf},
+    net::{TcpListener, TcpStream, ToSocketAddrs, UnixListener, UnixStream},
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
@@ -40,6 +42,15 @@ impl ListenAddress {
                 .unwrap()
                 .to_string(),
         ))
+    }
+
+    pub async fn bind(&self) -> Result<OnionServiceListener, Box<dyn std::error::Error>> {
+        match self {
+            Self::Tcp(socket_addr) => Ok(OnionServiceListener::Tcp(
+                TcpListener::bind(socket_addr).await?,
+            )),
+            Self::Unix(path) => Ok(OnionServiceListener::Unix(UnixListener::bind(path)?)),
+        }
     }
 }
 
@@ -89,6 +100,68 @@ impl FromStr for ListenAddress {
             Ok(Self::from_unix_string(path)?)
         } else {
             Ok(Self::from_tcp_string(s)?)
+        }
+    }
+}
+
+pub enum OnionServiceListener {
+    Tcp(TcpListener),
+    Unix(UnixListener),
+}
+
+impl OnionServiceListener {
+    pub async fn accept(&self) -> Result<OnionServiceStream, Box<dyn std::error::Error>> {
+        match self {
+            Self::Tcp(listener) => Ok(OnionServiceStream::Tcp(listener.accept().await?.0)),
+            Self::Unix(listener) => Ok(OnionServiceStream::Unix(listener.accept().await?.0)),
+        }
+    }
+}
+
+pub enum OnionServiceStream {
+    Tcp(TcpStream),
+    Unix(UnixStream),
+}
+
+impl AsyncRead for OnionServiceStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        match Pin::into_inner(self) {
+            Self::Tcp(stream) => Pin::new(stream).poll_read(cx, buf),
+            Self::Unix(stream) => Pin::new(stream).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for OnionServiceStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        match Pin::into_inner(self) {
+            Self::Tcp(stream) => Pin::new(stream).poll_write(cx, buf),
+            Self::Unix(stream) => Pin::new(stream).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        match Pin::into_inner(self) {
+            Self::Tcp(stream) => Pin::new(stream).poll_flush(cx),
+            Self::Unix(stream) => Pin::new(stream).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        match Pin::into_inner(self) {
+            Self::Tcp(stream) => Pin::new(stream).poll_shutdown(cx),
+            Self::Unix(stream) => Pin::new(stream).poll_shutdown(cx),
         }
     }
 }
