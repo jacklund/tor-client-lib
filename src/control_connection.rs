@@ -45,6 +45,12 @@ impl SocketAddr {
     }
 }
 
+impl From<TcpSocketAddr> for SocketAddr {
+    fn from(socket_addr: TcpSocketAddr) -> SocketAddr {
+        Self::Tcp(socket_addr)
+    }
+}
+
 impl Display for SocketAddr {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         match self {
@@ -110,10 +116,19 @@ impl OnionServiceListener {
         }
     }
 
-    pub async fn accept(&self) -> Result<OnionServiceStream, std::io::Error> {
+    pub async fn accept(&self) -> Result<(OnionServiceStream, SocketAddr), std::io::Error> {
         match self {
-            Self::Tcp(listener) => Ok(OnionServiceStream::Tcp(listener.accept().await?.0)),
-            Self::Unix(listener) => Ok(OnionServiceStream::Unix(listener.accept().await?.0)),
+            Self::Tcp(listener) => {
+                let (stream, socket) = listener.accept().await?;
+                Ok((OnionServiceStream::Tcp(stream), socket.into()))
+            }
+            Self::Unix(listener) => {
+                let (stream, socket) = listener.accept().await?;
+                Ok((
+                    OnionServiceStream::Unix(stream),
+                    SocketAddr::Unix(socket.as_pathname().unwrap().to_string_lossy().to_string()),
+                ))
+            }
         }
     }
 }
