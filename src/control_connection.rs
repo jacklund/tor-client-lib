@@ -101,10 +101,7 @@ pub enum OnionServiceListener {
 }
 
 impl OnionServiceListener {
-    pub async fn bind(
-        &self,
-        socket_addr: SocketAddr,
-    ) -> Result<OnionServiceListener, std::io::Error> {
+    pub async fn bind(socket_addr: SocketAddr) -> Result<OnionServiceListener, std::io::Error> {
         match socket_addr {
             SocketAddr::Tcp(socket_addr) => Ok(OnionServiceListener::Tcp(
                 TcpListener::bind(socket_addr).await?,
