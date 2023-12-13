@@ -330,6 +330,10 @@ impl OnionService {
     pub fn signing_key(&self) -> &TorEd25519SigningKey {
         &self.signing_key
     }
+
+    pub fn ports(&self) -> &Vec<OnionServiceMapping> {
+        &self.ports
+    }
 }
 
 #[derive(Debug)]
