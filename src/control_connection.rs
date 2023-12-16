@@ -197,6 +197,14 @@ impl OnionServiceMapping {
             },
         }
     }
+
+    pub fn virt_port(&self) -> u16 {
+        self.virt_port
+    }
+
+    pub fn listen_address(&self) -> &SocketAddr {
+        &self.listen_address
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
