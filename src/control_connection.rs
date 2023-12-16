@@ -269,7 +269,7 @@ impl FromStr for OnionAddress {
 
 impl Display for OnionAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
-        write!(f, "{}:{}", self.service_id, self.service_port)
+        write!(f, "{}.onion:{}", self.service_id, self.service_port)
     }
 }
 
