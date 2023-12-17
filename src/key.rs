@@ -156,6 +156,12 @@ impl TorEd25519SigningKey {
     }
 }
 
+impl std::fmt::Display for TorEd25519SigningKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", base64::encode(&self.0))
+    }
+}
+
 impl From<TorBlob> for TorEd25519SigningKey {
     fn from(blob: TorBlob) -> Self {
         Self(blob)
