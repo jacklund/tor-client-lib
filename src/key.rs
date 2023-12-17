@@ -12,23 +12,18 @@ use sha3::{Digest, Sha3_256};
 
 const TOR_VERSION: u8 = 3;
 
-#[serde_as]
 #[derive(Clone, Deserialize, Serialize, Debug, Hash, PartialEq, Eq)]
-pub struct TorServiceId {
-    #[serde_as(as = "Base64")]
-    verifying_key: [u8; 32],
-    service_id: String,
-}
+pub struct TorServiceId(String);
 
 impl From<TorServiceId> for String {
     fn from(id: TorServiceId) -> String {
-        id.service_id
+        id.0
     }
 }
 
 impl std::fmt::Display for TorServiceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.service_id)
+        write!(f, "{}", self.0)
     }
 }
 
@@ -48,11 +43,7 @@ impl std::convert::From<VerifyingKey> for TorServiceId {
         onion_bytes.extend_from_slice(&checksum);
         onion_bytes.extend_from_slice(version);
 
-        Self {
-            verifying_key: *verifying_key_bytes,
-            service_id: base32::encode(Alphabet::RFC4648 { padding: false }, &onion_bytes)
-                .to_lowercase(),
-        }
+        Self(base32::encode(Alphabet::RFC4648 { padding: false }, &onion_bytes).to_lowercase())
     }
 }
 
@@ -66,14 +57,6 @@ impl std::str::FromStr for TorServiceId {
         };
         let mut verifying_key_bytes = [0u8; 32];
         verifying_key_bytes.copy_from_slice(&onion_bytes[..32]);
-        let verifying_key = match VerifyingKey::from_bytes(&verifying_key_bytes) {
-            Ok(key) => key,
-            Err(_) => {
-                return Err(TorError::protocol_error(
-                    "Error parsing verifying key from bytes",
-                ))
-            }
-        };
         let mut checksum = [0u8; 2];
         checksum.copy_from_slice(&onion_bytes[32..34]);
         let verifying_checksum = Self::calculate_checksum(&verifying_key_bytes);
@@ -81,10 +64,7 @@ impl std::str::FromStr for TorServiceId {
             return Err(TorError::protocol_error("Invalid checksum"));
         }
 
-        Ok(Self {
-            verifying_key: *verifying_key.as_bytes(),
-            service_id: service_id.to_string(),
-        })
+        Ok(Self(service_id.to_string()))
     }
 }
 
@@ -100,16 +80,30 @@ impl TorServiceId {
         checksum
     }
 
-    pub fn verifying_key(&self) -> VerifyingKey {
-        VerifyingKey::from_bytes(&self.verifying_key).unwrap()
+    pub fn verifying_key(&self) -> Result<VerifyingKey, TorError> {
+        let onion_bytes = match base32::decode(Alphabet::RFC4648 { padding: false }, &self.0) {
+            Some(bytes) => bytes,
+            None => return Err(TorError::protocol_error("Error base32 decoding service ID")),
+        };
+        let mut verifying_key_bytes = [0u8; 32];
+        verifying_key_bytes.copy_from_slice(&onion_bytes[..32]);
+        let verifying_key = match VerifyingKey::from_bytes(&verifying_key_bytes) {
+            Ok(key) => key,
+            Err(_) => {
+                return Err(TorError::protocol_error(
+                    "Error parsing verifying key from bytes",
+                ))
+            }
+        };
+        Ok(verifying_key)
     }
 
     pub fn as_str(&self) -> &str {
-        &self.service_id
+        &self.0
     }
 
     pub fn onion_hostname(&self) -> String {
-        format!("{}.onion", self.service_id)
+        format!("{}.onion", self.0)
     }
 }
 
@@ -241,7 +235,7 @@ mod tests {
     fn test_serialize_service_id() -> Result<(), anyhow::Error> {
         let service_id =
             TorServiceId::from_str("vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad")?;
-        let expected = "{\"verifying_key\":\"rWAQgU26PW5yfovXk/2sJIubbimiRoS+EqduvbTrUOQ=\",\"service_id\":\"vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad\"}";
+        let expected = "\"vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad\"";
         let json_out = serde_json::to_string(&service_id)?;
         assert_eq!(expected, json_out);
         let deserialized_service_id: TorServiceId = serde_json::from_str(&json_out)?;
