@@ -156,6 +156,26 @@ impl TorEd25519SigningKey {
     }
 }
 
+impl std::str::FromStr for TorEd25519SigningKey {
+    type Err = TorError;
+
+    fn from_str(key: &str) -> Result<Self, Self::Err> {
+        let onion_bytes = match base64::decode(key) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                return Err(TorError::protocol_error(&format!(
+                    "Error decoding key bytes: {}",
+                    error
+                )))
+            }
+        };
+        let mut key_bytes = [0u8; 64];
+        key_bytes.copy_from_slice(&onion_bytes[..64]);
+
+        Ok(Self::from_bytes(key_bytes))
+    }
+}
+
 impl std::fmt::Display for TorEd25519SigningKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", base64::encode(&self.0))
