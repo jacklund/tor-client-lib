@@ -181,7 +181,7 @@ impl AsyncWrite for OnionServiceStream {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct OnionServiceMapping {
     virt_port: u16,
     listen_address: SocketAddr,
@@ -273,7 +273,7 @@ impl Display for OnionAddress {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct OnionService {
     ports: Vec<OnionServiceMapping>,
     service_id: TorServiceId,
