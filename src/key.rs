@@ -12,7 +12,7 @@ use sha3::{Digest, Sha3_256};
 
 const TOR_VERSION: u8 = 3;
 
-#[derive(Clone, Deserialize, Serialize, Debug, Hash, PartialEq, Eq)]
+#[derive(Clone, Deserialize, Serialize, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TorServiceId(String);
 
 impl From<TorServiceId> for String {
@@ -111,7 +111,7 @@ pub type TorBlob = [u8; 64];
 
 /// Ed25519 Signing key
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Ord)]
 pub struct TorEd25519SigningKey(#[serde_as(as = "Base64")] TorBlob);
 
 impl TorEd25519SigningKey {
