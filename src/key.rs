@@ -5,6 +5,7 @@ use ed25519_dalek::{
     hazmat::{raw_sign, ExpandedSecretKey},
     Signature, SignatureError, Signer, SigningKey as DalekSigningKey, Verifier, VerifyingKey,
 };
+use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as};
 use sha2::Sha512;
@@ -69,6 +70,11 @@ impl std::str::FromStr for TorServiceId {
 }
 
 impl TorServiceId {
+    pub fn generate() -> Self {
+        let signing_key = DalekSigningKey::generate(&mut OsRng);
+        signing_key.verifying_key().into()
+    }
+
     fn calculate_checksum(verifying_key_bytes: &[u8]) -> [u8; 2] {
         let mut checksum_bytes = ".onion checksum".as_bytes().to_vec();
         checksum_bytes.extend_from_slice(verifying_key_bytes);

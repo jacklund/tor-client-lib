@@ -12,7 +12,7 @@ anyhow = "1.0.72"
 base32 = "0.4.0"
 base64 = "0.21.2"
 curve25519-dalek = "4.1.0"
-ed25519-dalek = { version = "2.0.0", features = ["pkcs8", "serde", "signature", "pem", "hazmat"] }
+ed25519-dalek = { version = "2.0.0", features = ["pkcs8", "serde", "signature", "pem", "hazmat", "rand_core"] }
 env_logger = "0.10.0"
 futures = "0.3.28"
 hex = "0.4.3"
