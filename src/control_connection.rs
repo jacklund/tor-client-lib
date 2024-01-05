@@ -207,7 +207,7 @@ impl OnionServiceMapping {
     }
 }
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionAddress {
     service_id: TorServiceId,
     service_port: u16,
