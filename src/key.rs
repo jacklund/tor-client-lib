@@ -201,7 +201,7 @@ impl From<&DalekSigningKey> for TorEd25519SigningKey {
             .chain_update(signing_key.to_bytes())
             .finalize();
 
-        Self(blob.try_into().unwrap())
+        Self(blob.into())
     }
 }
 
