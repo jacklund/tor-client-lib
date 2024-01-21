@@ -22,6 +22,9 @@ use tokio::{
 };
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
+/// Generalization of the [std::net::SocketAddr] for Tor communication.
+/// Clients can communicate with the Tor server either through the standard TCP connection, or
+/// through a Unix socket.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
 pub enum SocketAddr {
     Tcp(TcpSocketAddr),
@@ -29,10 +32,12 @@ pub enum SocketAddr {
 }
 
 impl SocketAddr {
+    /// Create the socket address from a TCP address string of the form "<ip>:<port>"
     fn from_tcp_string(address: &str) -> Result<Self, AddrParseError> {
         Ok(Self::Tcp(TcpSocketAddr::from_str(address)?))
     }
 
+    /// Create the socket address from the path to the unix socket
     fn from_unix_string<P: AsRef<Path>>(path: P) -> Result<Self, std::io::Error> {
         Ok(Self::Unix(
             UnixSocketAddr::from_pathname(path)?
@@ -45,6 +50,7 @@ impl SocketAddr {
     }
 }
 
+/// Convert from a [std::net::SocketAddr] to this
 impl From<TcpSocketAddr> for SocketAddr {
     fn from(socket_addr: TcpSocketAddr) -> SocketAddr {
         Self::Tcp(socket_addr)
@@ -60,6 +66,7 @@ impl Display for SocketAddr {
     }
 }
 
+/// Error returned when a given listen address type has a parse error
 #[derive(Debug)]
 pub enum ListenAddressParseError {
     TcpParseError(AddrParseError),
@@ -101,12 +108,14 @@ impl FromStr for SocketAddr {
     }
 }
 
+/// You can listen for data for an onion service either through TCP or a unix socket
 pub enum OnionServiceListener {
     Tcp(TcpListener),
     Unix(UnixListener),
 }
 
 impl OnionServiceListener {
+    /// Bind to the given socket address for listening
     pub async fn bind(socket_addr: SocketAddr) -> Result<OnionServiceListener, std::io::Error> {
         match socket_addr {
             SocketAddr::Tcp(socket_addr) => Ok(OnionServiceListener::Tcp(
@@ -116,6 +125,7 @@ impl OnionServiceListener {
         }
     }
 
+    /// Accept an incoming connection from the listener
     pub async fn accept(&self) -> Result<(OnionServiceStream, SocketAddr), std::io::Error> {
         match self {
             Self::Tcp(listener) => {
@@ -133,6 +143,7 @@ impl OnionServiceListener {
     }
 }
 
+/// A stream of data from an accepted listener socket
 pub enum OnionServiceStream {
     Tcp(TcpStream),
     Unix(UnixStream),
@@ -181,6 +192,7 @@ impl AsyncWrite for OnionServiceStream {
     }
 }
 
+/// Mapping from an Onion service virtual port to a local listen address
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct OnionServiceMapping {
     virt_port: u16,
@@ -207,6 +219,7 @@ impl OnionServiceMapping {
     }
 }
 
+/// Onion address, containing a [TorServiceId] and a service port
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OnionAddress {
     service_id: TorServiceId,
@@ -273,6 +286,20 @@ impl Display for OnionAddress {
     }
 }
 
+/// Definition of a Tor Onion service (AKA "hidden service").
+///
+/// An onion service can be thought of as an encrypted load balancer, which presents itself as a
+/// virtual host in the Tor network, and which maps virtual ports on that virtual host to service
+/// ports running on your local machine. While, in practice, most onion services map a single
+/// virtual port to a service port, say, 443 to 443, you can map multiple virtual ports to a single
+/// service port, or a single virtual port to multiple service ports (in which case Tor will load
+/// balance the traffic coming in on the virtual port across the corresponding service ports).
+///
+/// Each onion service has the following:
+/// - The service ID contains all the information for the public key (see [TorServiceId] for
+/// details).
+/// - The signing, i.e, private, key for the onion service
+/// - The mapping from the virtual port(s) to the service port(s)
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct OnionService {
     ports: Vec<OnionServiceMapping>,
@@ -281,6 +308,7 @@ pub struct OnionService {
 }
 
 impl OnionService {
+    /// Create a new `OnionService` object
     pub fn new<S, K>(id: S, key: K, ports: &[OnionServiceMapping]) -> Self
     where
         TorServiceId: From<S>,
@@ -293,6 +321,9 @@ impl OnionService {
         }
     }
 
+    /// Return all the listen addresses for a given onion address (including virtual port)
+    /// `onion_address` should be formatted as `<onion-address>:<port>`, e.g.
+    /// `joikeok6el5h5sbrojo2h3afw63lmfm7huvwtziacl34wjrx7n62gsad.onion:443`
     pub fn listen_addresses_for_onion_address(&self, onion_address: &str) -> Vec<SocketAddr> {
         self.ports
             .iter()
@@ -302,6 +333,7 @@ impl OnionService {
             .collect()
     }
 
+    /// Return all the listen addresses for the given local service port
     pub fn listen_addresses_for_port(&self, service_port: u16) -> Vec<SocketAddr> {
         self.ports
             .iter()
@@ -310,6 +342,8 @@ impl OnionService {
             .collect()
     }
 
+    /// Return the onion address (i.e., the onion hostname and virtual port) which maps to the
+    /// given local service port
     pub fn onion_address(&self, service_port: u16) -> Result<OnionAddress, TorError> {
         if self.ports.iter().any(|p| p.virt_port == service_port) {
             Ok(OnionAddress {
@@ -324,6 +358,7 @@ impl OnionService {
         }
     }
 
+    /// Return a list of all the onion addresses for this onion service
     pub fn onion_addresses(&self) -> Vec<OnionAddress> {
         self.ports
             .iter()
@@ -331,19 +366,23 @@ impl OnionService {
             .collect()
     }
 
+    /// Return the [TorServiceId] for this onion service
     pub fn service_id(&self) -> &TorServiceId {
         &self.service_id
     }
 
+    /// Return the Tor signing key for this onion service
     pub fn signing_key(&self) -> &TorEd25519SigningKey {
         &self.signing_key
     }
 
+    /// Return the list of virtual to service port mappings for this onion service
     pub fn ports(&self) -> &Vec<OnionServiceMapping> {
         &self.ports
     }
 }
 
+/// Response returned by the Tor server in response to a command
 #[derive(Debug)]
 pub struct ControlResponse {
     pub status_code: u16,
@@ -570,7 +609,7 @@ impl TorControlConnection {
     }
 
     /// Convert an existing TCPStream into a connection object
-    pub fn with_stream(stream: TcpStream) -> Result<Self, TorError> {
+    pub(crate) fn with_stream(stream: TcpStream) -> Result<Self, TorError> {
         let (reader, writer) = tokio::io::split(stream);
         Ok(Self {
             reader: FramedRead::new(reader, LinesCodec::new()),
@@ -637,6 +676,7 @@ impl TorControlConnection {
         }
     }
 
+    /// Send the GETINFO command and parse the response
     pub async fn get_info(&mut self, info: &str) -> Result<Vec<String>, TorError> {
         let control_response = self.send_command("GETINFO", Some(info)).await?;
         info!(
@@ -680,7 +720,7 @@ impl TorControlConnection {
     }
 
     /// Send a general command to the Tor server
-    pub async fn send_command(
+    pub(crate) async fn send_command(
         &mut self,
         command: &str,
         arguments: Option<&str>,
@@ -879,11 +919,6 @@ mod tests {
         let mut tor = TorControlConnection::with_stream(client)?;
         let result = tor.authenticate(TorAuthentication::Null).await;
         assert!(result.is_err());
-        // TODO: Fix this!!!
-        // assert_eq!(
-        //     TorError::AuthenticationError("Oops".into()),
-        //     result.unwrap_err()
-        // );
 
         Ok(())
     }

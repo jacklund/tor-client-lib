@@ -123,6 +123,17 @@ async fn safe_cookie_authentication(
     Ok(())
 }
 
+/// Methods for Tor authentication:
+/// - Null - No authentication
+/// - SafeCookie - `SAFECOOKIE` authentication
+/// - HashedPassword - pass the hashed password to authenticate
+///
+/// With `SafeCookie` auth, you can either pass in the cookie value as a binary vector, or, if you
+/// pass in "None", it will call the PROTOCOLINFO command to get the location of the cookie file,
+/// and attempt to read that and pass the value to authenticate.
+///
+/// Note that we don't support plain `COOKIE` authentication, since that's been determmined to be
+/// unsafe.
 pub enum TorAuthentication {
     Null,
     SafeCookie(Option<Vec<u8>>), // Cookie String
@@ -136,6 +147,7 @@ lazy_static! {
 }
 
 impl TorAuthentication {
+    /// Authenticate using this method to the server
     pub async fn authenticate(
         &self,
         connection: &mut TorControlConnection,

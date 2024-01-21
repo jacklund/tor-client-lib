@@ -13,9 +13,15 @@ use sha3::{Digest, Sha3_256};
 
 const TOR_VERSION: u8 = 3;
 
+/// The service ID for the onion service.
+///
+/// Basically the service ID is the part of the onion address
+/// before the ".onion" part. This is an encoding of the onion service's public key into a string.
+/// As such, you can convert from the service ID to the public key, and vice-versa.
 #[derive(Clone, Deserialize, Serialize, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub struct TorServiceId(String);
 
+/// Convert the service ID to a String
 impl From<TorServiceId> for String {
     fn from(id: TorServiceId) -> String {
         id.0
@@ -28,8 +34,8 @@ impl std::fmt::Display for TorServiceId {
     }
 }
 
-/// Generate the Tor service ID from a verifying key
-/// From section 6 of rend-spec-v3.txt
+/// Generate the Tor service ID from an ed25519_dalek verifying (public) key
+/// From section 6 of <https://github.com/torproject/torspec/blob/main/rend-spec-v3.txt>
 impl std::convert::From<VerifyingKey> for TorServiceId {
     fn from(verifying_key: VerifyingKey) -> Self {
         // Version number
@@ -48,6 +54,8 @@ impl std::convert::From<VerifyingKey> for TorServiceId {
     }
 }
 
+/// Parse a String into a service ID. Note that this does a good bit of verification that the
+/// service ID is indeed a service ID
 impl std::str::FromStr for TorServiceId {
     type Err = TorError;
 
@@ -70,6 +78,7 @@ impl std::str::FromStr for TorServiceId {
 }
 
 impl TorServiceId {
+    /// Generate a new ED25519 public key, and the corresponding TorServiceId
     pub fn generate() -> Self {
         let signing_key = DalekSigningKey::generate(&mut OsRng);
         signing_key.verifying_key().into()
@@ -86,6 +95,7 @@ impl TorServiceId {
         checksum
     }
 
+    /// Retrieve the public ED25519 verifying key from the TorServiceId
     pub fn verifying_key(&self) -> Result<VerifyingKey, TorError> {
         let onion_bytes = match base32::decode(Alphabet::RFC4648 { padding: false }, &self.0) {
             Some(bytes) => bytes,
@@ -108,14 +118,21 @@ impl TorServiceId {
         &self.0
     }
 
+    /// Generate the corresponding onion hostname (by tacking on the ".onion" part)
     pub fn onion_hostname(&self) -> String {
         format!("{}.onion", self.0)
     }
 }
 
+/// Type definition for the blob data returned by Tor
 pub type TorBlob = [u8; 64];
 
-/// Ed25519 Signing key
+/// Tor Ed25519 Signing (private) key
+///
+/// Note that this is not _exactly_ the same as, say, the ed25519_dalek signing key - basically, we
+/// store the 64-byte blob data returned by the Tor API, which is the hash of the original random
+/// 32-byte value, before clamping. This allows us to either use this directly when Tor requires
+/// the original blob value, or convert it easily to an actual ED25519 private key.
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Ord)]
 pub struct TorEd25519SigningKey(#[serde_as(as = "Base64")] TorBlob);
@@ -125,6 +142,7 @@ impl TorEd25519SigningKey {
         ExpandedSecretKey::from_bytes(&self.0)
     }
 
+    /// Retrieve the public verifying key from the private key
     pub fn verifying_key(&self) -> VerifyingKey {
         VerifyingKey::from(&self.expanded_secret_key())
     }
@@ -135,7 +153,7 @@ impl TorEd25519SigningKey {
     }
 
     /// Create the signing key from the key blob returned by the `ADD_ONION` call
-    /// (see https://github.com/torproject/torspec/blob/main/control-spec.txt#L1862-L1864)
+    /// (see <https://github.com/torproject/torspec/blob/main/control-spec.txt#L1862-L1864>)
     pub fn from_blob(blob: &str) -> Self {
         // Decode the blob and turn it into the Dalek ExpandedSecretKey
         let blob = base64::decode(blob).unwrap();
@@ -153,15 +171,18 @@ impl TorEd25519SigningKey {
         self.verifying_key().verify(message, signature)
     }
 
+    /// Convert the key to a Tor blob value
     pub fn to_blob(&self) -> String {
         base64::encode(&self.0)
     }
 
+    /// Get the raw bytes of the signing key
     pub fn to_bytes(&self) -> [u8; 64] {
         self.0
     }
 }
 
+/// Convert from a Base64-encoded Tor blob to our signing key
 impl std::str::FromStr for TorEd25519SigningKey {
     type Err = TorError;
 
@@ -194,6 +215,8 @@ impl From<TorBlob> for TorEd25519SigningKey {
     }
 }
 
+/// Convert from an ED25519 signing key to our signing key.
+/// This takes the 32-byte secret key, hashes it, and stores that as the blob
 impl From<&DalekSigningKey> for TorEd25519SigningKey {
     fn from(signing_key: &DalekSigningKey) -> Self {
         // Hash the secret key
