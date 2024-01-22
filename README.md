@@ -40,3 +40,26 @@ control_connection.authenticate(TorAuthentication::SafeCookie(None)).await?;
 // Call the "GETINFO" command to get the Tor version number
 let tor_version = control_connection.get_info("version").await?;
 ```
+
+## CLI
+
+The repo includes a simple CLI for sending commands to Tor. To use it, run:
+
+```bash
+cargo run
+```
+
+For example:
+
+```bash
+% cargo run
+    Finished dev [unoptimized + debuginfo] target(s) in 0.07s
+     Running `target/debug/tor-cli`
+Welcome to Tor CLI v0.1.0
+Tor CLI> connect
+Connected to localhost:9051
+Tor CLI> authenticate cookie
+Authenticated
+Tor CLI> get_info version
+["0.4.6.10"]
+```
