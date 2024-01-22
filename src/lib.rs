@@ -17,7 +17,7 @@
 //! If you'd like to see more functions supported, please either submit an issue request or a PR.
 //!
 //! ## Example Code
-//! ```
+//! ```no_run
 //! # use tokio;
 //! use tor_client_lib::{
 //!     control_connection::TorControlConnection,
