@@ -20,7 +20,7 @@ This library currently supports a small (but useful) subset of the full [API](ht
 
 - `AUTHENTICATE`
 - `AUTHCHALLENGE`
-- `GETINFO``
+- `GETINFO`
 - `PROTOCOLINFO`
 - `ADD_ONION`
 - `DEL_ONION`
