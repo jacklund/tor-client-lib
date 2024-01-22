@@ -1,6 +1,11 @@
 # Tor Client Library
 
 This is a client library for Tor, which allows you to interact programmatically with a Tor server, using its API.
+
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE-APACHE)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE-MIT)
+![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/jacklund/tor-client-lib/rust.yml)
+
 ## Installation
 
 To add it to your existing project:
@@ -13,12 +18,12 @@ cargo add tor_client_lib
 
 This library currently supports a small (but useful) subset of the full [API](https://github.com/torproject/torspec/blob/main/control-spec.txt), namely:
 
-- AUTHENTICATE
-- AUTHCHALLENGE
-- GETINFO
-- PROTOCOLINFO
-- ADD_ONION
-- DEL_ONION
+- `AUTHENTICATE`
+- `AUTHCHALLENGE`
+- `GETINFO``
+- `PROTOCOLINFO`
+- `ADD_ONION`
+- `DEL_ONION`
 
 If you’d like to see more functions supported, please either submit an issue request or a PR.
 
