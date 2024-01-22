@@ -1,7 +1,7 @@
 # Tor Client Library
 
 This is a client library for Tor, which allows you to interact programmatically with a Tor server, using its API.
-Installation
+## Installation
 
 To add it to your existing project:
 
