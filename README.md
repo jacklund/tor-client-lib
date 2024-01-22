@@ -2,6 +2,7 @@
 
 This is a client library for Tor, which allows you to interact programmatically with a Tor server, using its API.
 
+[![Crates.io](https://img.shields.io/crates/v/clap?style=flat-square)](https://crates.io/crates/tor-client-lib)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)](LICENSE-APACHE)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE-MIT)
 ![GitHub Actions Workflow Status](https://img.shields.io/github/actions/workflow/status/jacklund/tor-client-lib/rust.yml)
