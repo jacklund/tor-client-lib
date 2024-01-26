@@ -451,6 +451,8 @@ async fn read_control_response<S: StreamExt<Item = Result<String, LinesCodecErro
                         reply_line.push('\n');
                     }
                     control_response.reply = reply_line;
+                    // Read the final "250 OK"
+                    read_line(reader).await?;
                     return Ok(control_response);
                 }
                 None => match END_REGEX.captures(&line) {
@@ -890,6 +892,7 @@ mod tests {
             .send("yxq7fa63tthq3nd2ul52jjcdpblyai6k3cfmdkyw23ljsoob66z3ywid")
             .await?;
         server.send(".").await?;
+        server.send("250 OK").await?;
         let result = read_control_response(&mut client).await;
         assert!(result.is_ok());
         let control_response = result.unwrap();
