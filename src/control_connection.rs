@@ -10,7 +10,7 @@ use log::info;
 use regex::{Captures, Regex};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Error, Formatter};
-use std::net::{AddrParseError, IpAddr, Ipv4Addr, SocketAddr as TcpSocketAddr};
+use std::net::{AddrParseError, SocketAddr as TcpSocketAddr};
 use std::os::unix::net::SocketAddr as UnixSocketAddr;
 use std::path::Path;
 use std::pin::Pin;
@@ -63,15 +63,6 @@ impl Display for SocketAddr {
             Self::Tcp(sock_addr) => write!(f, "{}", sock_addr),
             Self::Unix(sock_addr) => write!(f, "unix:{:?}", sock_addr),
         }
-    }
-}
-
-impl Default for SocketAddr {
-    fn default() -> Self {
-        SocketAddr::Tcp(TcpSocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            9051,
-        ))
     }
 }
 
