@@ -26,12 +26,12 @@ use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 /// Clients can communicate with the Tor server either through the standard TCP connection, or
 /// through a Unix socket.
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
-pub enum SocketAddr {
+pub enum TorSocketAddr {
     Tcp(TcpSocketAddr),
     Unix(String),
 }
 
-impl SocketAddr {
+impl TorSocketAddr {
     /// Create the socket address from a TCP address string of the form "<ip>:<port>"
     fn from_tcp_string(address: &str) -> Result<Self, AddrParseError> {
         Ok(Self::Tcp(TcpSocketAddr::from_str(address)?))
@@ -51,13 +51,13 @@ impl SocketAddr {
 }
 
 /// Convert from a [std::net::SocketAddr] to this
-impl From<TcpSocketAddr> for SocketAddr {
-    fn from(socket_addr: TcpSocketAddr) -> SocketAddr {
+impl From<TcpSocketAddr> for TorSocketAddr {
+    fn from(socket_addr: TcpSocketAddr) -> Self {
         Self::Tcp(socket_addr)
     }
 }
 
-impl Display for SocketAddr {
+impl Display for TorSocketAddr {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), Error> {
         match self {
             Self::Tcp(sock_addr) => write!(f, "{}", sock_addr),
@@ -96,7 +96,7 @@ impl From<std::io::Error> for ListenAddressParseError {
     }
 }
 
-impl FromStr for SocketAddr {
+impl FromStr for TorSocketAddr {
     type Err = ListenAddressParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -116,17 +116,17 @@ pub enum OnionServiceListener {
 
 impl OnionServiceListener {
     /// Bind to the given socket address for listening
-    pub async fn bind(socket_addr: SocketAddr) -> Result<OnionServiceListener, std::io::Error> {
+    pub async fn bind(socket_addr: TorSocketAddr) -> Result<OnionServiceListener, std::io::Error> {
         match socket_addr {
-            SocketAddr::Tcp(socket_addr) => Ok(OnionServiceListener::Tcp(
+            TorSocketAddr::Tcp(socket_addr) => Ok(OnionServiceListener::Tcp(
                 TcpListener::bind(socket_addr).await?,
             )),
-            SocketAddr::Unix(path) => Ok(OnionServiceListener::Unix(UnixListener::bind(path)?)),
+            TorSocketAddr::Unix(path) => Ok(OnionServiceListener::Unix(UnixListener::bind(path)?)),
         }
     }
 
     /// Accept an incoming connection from the listener
-    pub async fn accept(&self) -> Result<(OnionServiceStream, SocketAddr), std::io::Error> {
+    pub async fn accept(&self) -> Result<(OnionServiceStream, TorSocketAddr), std::io::Error> {
         match self {
             Self::Tcp(listener) => {
                 let (stream, socket) = listener.accept().await?;
@@ -136,7 +136,9 @@ impl OnionServiceListener {
                 let (stream, socket) = listener.accept().await?;
                 Ok((
                     OnionServiceStream::Unix(stream),
-                    SocketAddr::Unix(socket.as_pathname().unwrap().to_string_lossy().to_string()),
+                    TorSocketAddr::Unix(
+                        socket.as_pathname().unwrap().to_string_lossy().to_string(),
+                    ),
                 ))
             }
         }
@@ -196,15 +198,17 @@ impl AsyncWrite for OnionServiceStream {
 #[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
 pub struct OnionServiceMapping {
     virt_port: u16,
-    listen_address: SocketAddr,
+    listen_address: TorSocketAddr,
 }
 
 impl OnionServiceMapping {
-    pub fn new(virt_port: u16, listen_address: Option<SocketAddr>) -> Self {
+    pub fn new(virt_port: u16, listen_address: Option<TorSocketAddr>) -> Self {
         Self {
             virt_port,
             listen_address: match listen_address {
-                None => SocketAddr::from_tcp_string(&format!("127.0.0.1:{}", virt_port)).unwrap(),
+                None => {
+                    TorSocketAddr::from_tcp_string(&format!("127.0.0.1:{}", virt_port)).unwrap()
+                }
                 Some(a) => a,
             },
         }
@@ -214,7 +218,7 @@ impl OnionServiceMapping {
         self.virt_port
     }
 
-    pub fn listen_address(&self) -> &SocketAddr {
+    pub fn listen_address(&self) -> &TorSocketAddr {
         &self.listen_address
     }
 }
@@ -324,7 +328,7 @@ impl OnionService {
     /// Return all the listen addresses for a given onion address (including virtual port)
     /// `onion_address` should be formatted as `<onion-address>:<port>`, e.g.
     /// `joikeok6el5h5sbrojo2h3afw63lmfm7huvwtziacl34wjrx7n62gsad.onion:443`
-    pub fn listen_addresses_for_onion_address(&self, onion_address: &str) -> Vec<SocketAddr> {
+    pub fn listen_addresses_for_onion_address(&self, onion_address: &str) -> Vec<TorSocketAddr> {
         self.ports
             .iter()
             .map(|p| (p, format!("{}.onion:{}", self.service_id, p.virt_port)))
@@ -334,7 +338,7 @@ impl OnionService {
     }
 
     /// Return all the listen addresses for the given local service port
-    pub fn listen_addresses_for_port(&self, service_port: u16) -> Vec<SocketAddr> {
+    pub fn listen_addresses_for_port(&self, service_port: u16) -> Vec<TorSocketAddr> {
         self.ports
             .iter()
             .filter(|p| p.virt_port == service_port)
@@ -943,7 +947,7 @@ mod tests {
             .await?;
         assert_eq!(8080, onion_service.ports[0].virt_port);
         assert_eq!(
-            SocketAddr::from_tcp_string("127.0.0.1:8080"),
+            TorSocketAddr::from_tcp_string("127.0.0.1:8080"),
             Ok(onion_service.ports[0].clone().listen_address)
         );
         assert_eq!(

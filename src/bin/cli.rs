@@ -6,7 +6,7 @@ use std::str::FromStr;
 use tokio::runtime::Runtime;
 use tor_client_lib::{
     auth::TorAuthentication,
-    control_connection::{OnionServiceMapping, SocketAddr, TorControlConnection},
+    control_connection::{OnionServiceMapping, TorControlConnection, TorSocketAddr},
 };
 
 lazy_static! {
@@ -139,7 +139,7 @@ fn add_onion_service(
     match RUNTIME.block_on(connection.create_onion_service(
         &[OnionServiceMapping::new(
             virt_port,
-            Some(SocketAddr::from_str(&listen_address).unwrap()),
+            Some(TorSocketAddr::from_str(&listen_address).unwrap()),
         )],
         transient,
         None,
