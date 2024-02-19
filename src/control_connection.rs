@@ -3,7 +3,6 @@ use crate::{
     error::TorError,
     key::{TorEd25519SigningKey, TorServiceId},
 };
-use ed25519_dalek::SigningKey;
 use futures::{SinkExt, StreamExt};
 use lazy_static::lazy_static;
 use log::info;
@@ -510,12 +509,12 @@ fn format_onion_service_request_string(
 fn format_key_request_string(
     ports: &[OnionServiceMapping],
     transient: bool,
-    signing_key: Option<&SigningKey>,
+    signing_key: Option<&TorEd25519SigningKey>,
 ) -> String {
     match signing_key {
         Some(signing_key) => format_onion_service_request_string(
             "ED25519-V3",
-            &TorEd25519SigningKey::from(signing_key).to_blob(),
+            &signing_key.to_blob(),
             ports,
             transient,
         ),
@@ -542,7 +541,7 @@ fn parse_required_response_field<'a>(
 fn parse_add_onion_response(
     captures: &Captures<'_>,
     ports: &[OnionServiceMapping],
-    signing_key: Option<&SigningKey>,
+    signing_key: Option<&TorEd25519SigningKey>,
 ) -> Result<OnionService, TorError> {
     // Parse the Hash value
     let hash_string =
@@ -551,7 +550,7 @@ fn parse_add_onion_response(
     // Retrieve the key, either the one passed in or the one
     // returned from the controller
     let (returned_signing_key, verifying_key) = match signing_key {
-        Some(signing_key) => (signing_key.into(), signing_key.verifying_key()),
+        Some(signing_key) => (signing_key.clone(), signing_key.verifying_key()),
         None => match captures.name("key_type") {
             Some(_) => {
                 let signing_key =
@@ -751,7 +750,7 @@ impl TorControlConnection {
         &mut self,
         ports: &[OnionServiceMapping],
         transient: bool,
-        signing_key: Option<&SigningKey>,
+        signing_key: Option<&TorEd25519SigningKey>,
     ) -> Result<OnionService, TorError> {
         // Create the request string from the arguments
         let request_string = format_key_request_string(ports, transient, signing_key);
