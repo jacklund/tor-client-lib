@@ -134,6 +134,7 @@ async fn safe_cookie_authentication(
 ///
 /// Note that we don't support plain `COOKIE` authentication, since that's been determmined to be
 /// unsafe.
+#[derive(strum_macros::Display)]
 pub enum TorAuthentication {
     Null,
     SafeCookie(Option<Vec<u8>>), // Cookie String
@@ -212,5 +213,26 @@ impl TorAuthentication {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_auth_display() {
+        assert_eq!("Null", format!("{}", TorAuthentication::Null));
+        assert_eq!(
+            "HashedPassword",
+            format!("{}", TorAuthentication::HashedPassword("foobar".into()))
+        );
+        assert_eq!(
+            "SafeCookie",
+            format!(
+                "{}",
+                TorAuthentication::SafeCookie(Some("foobar".as_bytes().to_vec()))
+            )
+        );
     }
 }
