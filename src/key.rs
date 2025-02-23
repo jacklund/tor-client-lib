@@ -137,7 +137,7 @@ pub type TorBlob = [u8; 64];
 /// 32-byte value, before clamping. This allows us to either use this directly when Tor requires
 /// the original blob value, or convert it easily to an actual ED25519 private key.
 #[serde_as]
-#[derive(Clone, Debug, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(Clone, Debug, Hash, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Ord)]
 pub struct TorEd25519SigningKey(#[serde_as(as = "Base64")] TorBlob);
 
 impl TorEd25519SigningKey {
