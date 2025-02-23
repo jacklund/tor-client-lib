@@ -90,21 +90,21 @@ fn authenticate(args: HashMap<String, Value>, context: &mut Context) -> Result<O
     };
     let auth_type: String = args.get("auth_type").unwrap().convert()?;
     match auth_type.as_str() {
-        "null" => match RUNTIME.block_on(connection.authenticate(TorAuthentication::Null)) {
+        "null" => match RUNTIME.block_on(connection.authenticate(&TorAuthentication::Null)) {
             Ok(()) => Ok(Some("Authenticated".to_string())),
             Err(error) => Ok(Some(format!("Authentication error: {}", error))),
         },
         "password" => {
             let password = rpassword::prompt_password("Tor password: ").unwrap();
             match RUNTIME
-                .block_on(connection.authenticate(TorAuthentication::HashedPassword(password)))
+                .block_on(connection.authenticate(&TorAuthentication::HashedPassword(password)))
             {
                 Ok(()) => Ok(Some("Authenticated".to_string())),
                 Err(error) => Ok(Some(format!("Authentication error: {}", error))),
             }
         }
         "cookie" => {
-            match RUNTIME.block_on(connection.authenticate(TorAuthentication::SafeCookie(None))) {
+            match RUNTIME.block_on(connection.authenticate(&TorAuthentication::SafeCookie(None))) {
                 Ok(()) => Ok(Some("Authenticated".to_string())),
                 Err(error) => Ok(Some(format!("Authentication error: {}", error))),
             }

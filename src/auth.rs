@@ -5,6 +5,7 @@ use hmac::{Hmac, Mac};
 use lazy_static::lazy_static;
 use rand;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 
 // Create alias for HMAC-SHA256
@@ -134,8 +135,9 @@ async fn safe_cookie_authentication(
 ///
 /// Note that we don't support plain `COOKIE` authentication, since that's been determmined to be
 /// unsafe.
-#[derive(strum_macros::Display)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, strum_macros::Display)]
 pub enum TorAuthentication {
+    #[default]
     Null,
     SafeCookie(Option<Vec<u8>>), // Cookie String
     HashedPassword(String),      // Password

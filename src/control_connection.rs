@@ -736,7 +736,7 @@ impl TorControlConnection {
     }
 
     /// Authenticate to the Tor server using the passed-in method
-    pub async fn authenticate(&mut self, method: TorAuthentication) -> Result<(), TorError> {
+    pub async fn authenticate(&mut self, method: &TorAuthentication) -> Result<(), TorError> {
         method.authenticate(self).await?;
         Ok(())
     }
@@ -933,14 +933,14 @@ mod tests {
             .await?;
         server.send("250 OK").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
-        let result = tor.authenticate(TorAuthentication::Null).await;
+        let result = tor.authenticate(&TorAuthentication::Null).await;
         assert!(result.is_ok());
 
         let (client, server) = create_mock().await?;
         let mut server = Framed::new(server, LinesCodec::new());
         server.send("551 Oops").await?;
         let mut tor = TorControlConnection::with_stream(client)?;
-        let result = tor.authenticate(TorAuthentication::Null).await;
+        let result = tor.authenticate(&TorAuthentication::Null).await;
         assert!(result.is_err());
 
         Ok(())

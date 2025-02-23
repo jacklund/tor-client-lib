@@ -31,7 +31,7 @@
 //! let mut control_connection = TorControlConnection::connect("127.0.0.1:9051").await?;
 //!
 //! // Authenticate to the Tor server
-//! control_connection.authenticate(TorAuthentication::SafeCookie(None)).await?;
+//! control_connection.authenticate(&TorAuthentication::SafeCookie(None)).await?;
 //!
 //! // Call the "GETINFO" command to get the Tor version number
 //! let tor_version = control_connection.get_info("version").await?;
