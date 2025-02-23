@@ -19,6 +19,7 @@ use tokio::{
     io::{AsyncRead, AsyncWrite, ReadBuf, ReadHalf, WriteHalf},
     net::{TcpListener, TcpStream, ToSocketAddrs, UnixListener, UnixStream},
 };
+use tokio_stream::wrappers::{TcpListenerStream, UnixListenerStream};
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
 
 /// Generalization of the [std::net::SocketAddr] for Tor communication.
@@ -142,6 +143,22 @@ impl OnionServiceListener {
             }
         }
     }
+
+    pub fn as_stream(self) -> OnionServiceListenerStream {
+        match self {
+            OnionServiceListener::Tcp(listener) => {
+                OnionServiceListenerStream::Tcp(TcpListenerStream::new(listener))
+            }
+            OnionServiceListener::Unix(listener) => {
+                OnionServiceListenerStream::Unix(UnixListenerStream::new(listener))
+            }
+        }
+    }
+}
+
+pub enum OnionServiceListenerStream {
+    Tcp(TcpListenerStream),
+    Unix(UnixListenerStream),
 }
 
 /// A stream of data from an accepted listener socket

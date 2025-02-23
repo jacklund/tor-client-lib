@@ -38,4 +38,5 @@ strum = { version = "0.26.3", features = ["derive", "strum_macros"] }
 strum_macros = "0.26.4"
 tokio = { version = "1.31.0", features = ["io-std", "net", "io-util", "macros", "parking_lot", "test-util", "rt", "rt-multi-thread"] }
 tokio-socks = "0.5.1"
+tokio-stream = { version = "0.1.17", features = ["net"] }
 tokio-util = { version = "0.7.8", features = ["codec"] }
