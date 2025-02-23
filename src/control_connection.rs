@@ -329,15 +329,16 @@ pub struct OnionService {
 
 impl OnionService {
     /// Create a new `OnionService` object
-    pub fn new<S, K>(id: S, key: K, ports: &[OnionServiceMapping]) -> Self
+    pub fn new<K>(key: K, ports: &[OnionServiceMapping]) -> Self
     where
-        TorServiceId: From<S>,
         TorEd25519SigningKey: From<K>,
     {
+        let signing_key: TorEd25519SigningKey = key.into();
+        let service_id = signing_key.verifying_key().into();
         Self {
             ports: ports.to_vec(),
-            service_id: id.into(),
-            signing_key: key.into(),
+            service_id,
+            signing_key,
         }
     }
 
@@ -592,18 +593,15 @@ fn parse_add_onion_response(
                     hash_string, expected_service_id.as_str())));
     }
 
-    let service_id = match TorServiceId::from_str(hash_string) {
-        Ok(id) => id,
-        Err(error) => {
-            return Err(TorError::protocol_error(&format!(
-                "Error parsing Tor Service ID: {}",
-                error
-            )))
-        }
-    };
+    if let Err(error) = TorServiceId::from_str(hash_string) {
+        return Err(TorError::protocol_error(&format!(
+            "Error parsing Tor Service ID: {}",
+            error
+        )));
+    }
 
     // Return the Onion Service
-    Ok(OnionService::new(service_id, returned_signing_key, ports))
+    Ok(OnionService::new(returned_signing_key, ports))
 }
 
 /// ProtocolInfo struct, contains information from the response to the

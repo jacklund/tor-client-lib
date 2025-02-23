@@ -64,6 +64,9 @@ impl std::str::FromStr for TorServiceId {
             Some(bytes) => bytes,
             None => return Err(TorError::protocol_error("Error base32 decoding service ID")),
         };
+        if onion_bytes.len() != 35 {
+            return Err(TorError::protocol_error("Service ID is of wrong length"));
+        }
         let mut verifying_key_bytes = [0u8; 32];
         verifying_key_bytes.copy_from_slice(&onion_bytes[..32]);
         let mut checksum = [0u8; 2];
