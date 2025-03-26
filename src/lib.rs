@@ -46,6 +46,6 @@ pub mod error;
 pub mod key;
 
 pub use crate::auth::TorAuthentication;
-pub use crate::control_connection::{OnionService, TorControlConnection};
+pub use crate::control_connection::{OnionService, OnionServiceMapping, TorControlConnection};
 pub use crate::error::TorError;
 pub use crate::key::{TorEd25519SigningKey, TorServiceId};

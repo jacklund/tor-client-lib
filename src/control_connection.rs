@@ -21,6 +21,7 @@ use tokio::{
 };
 use tokio_stream::wrappers::{TcpListenerStream, UnixListenerStream};
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
+use zeroize::ZeroizeOnDrop;
 
 /// Generalization of the [std::net::SocketAddr] for Tor communication.
 /// Clients can communicate with the Tor server either through the standard TCP connection, or
@@ -320,9 +321,11 @@ impl Display for OnionAddress {
 /// details).
 /// - The signing, i.e, private, key for the onion service
 /// - The mapping from the virtual port(s) to the service port(s)
-#[derive(Clone, Debug, Eq, PartialEq, PartialOrd, Ord, Deserialize, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, ZeroizeOnDrop)]
 pub struct OnionService {
+    #[zeroize(skip)]
     ports: Vec<OnionServiceMapping>,
+    #[zeroize(skip)]
     service_id: TorServiceId,
     signing_key: TorEd25519SigningKey,
 }
@@ -561,8 +564,7 @@ fn parse_add_onion_response(
     ports: &[OnionServiceMapping],
     signing_key: Option<&TorEd25519SigningKey>,
 ) -> Result<OnionService, TorError> {
-    // Parse the Hash value
-    let hash_string =
+    let service_id =
         parse_required_response_field(captures, "service_id", "ServiceID", "ADD_ONION")?;
 
     // Retrieve the key, either the one passed in or the one
@@ -586,14 +588,14 @@ fn parse_add_onion_response(
 
     let expected_service_id: TorServiceId = verifying_key.into();
 
-    if expected_service_id.as_str() != hash_string {
+    if expected_service_id.as_str() != service_id {
         return Err(
             TorError::protocol_error(&format!(
                     "Service ID for onion service returned by tor ({}) doesn't match the service ID generated from verifying key ({})",
-                    hash_string, expected_service_id.as_str())));
+                    service_id, expected_service_id.as_str())));
     }
 
-    if let Err(error) = TorServiceId::from_str(hash_string) {
+    if let Err(error) = TorServiceId::from_str(service_id) {
         return Err(TorError::protocol_error(&format!(
             "Error parsing Tor Service ID: {}",
             error

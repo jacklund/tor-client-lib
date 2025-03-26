@@ -3,13 +3,15 @@ use base32::{self, Alphabet};
 use curve25519_dalek::Scalar;
 use ed25519_dalek::{
     hazmat::{raw_sign, ExpandedSecretKey},
-    Signature, SignatureError, Signer, SigningKey as DalekSigningKey, Verifier, VerifyingKey,
+    Signature, SignatureError, Signer, SigningKey, Verifier, VerifyingKey,
 };
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use serde_with::{base64::Base64, serde_as};
 use sha2::Sha512;
 use sha3::{Digest, Sha3_256};
+use std::str::FromStr;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 const TOR_VERSION: u8 = 3;
 
@@ -18,13 +20,25 @@ const TOR_VERSION: u8 = 3;
 /// Basically the service ID is the part of the onion address
 /// before the ".onion" part. This is an encoding of the onion service's public key into a string.
 /// As such, you can convert from the service ID to the public key, and vice-versa.
-#[derive(Clone, Deserialize, Serialize, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Deserialize,
+    Serialize,
+    Debug,
+    Hash,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
 pub struct TorServiceId(String);
 
 /// Convert the service ID to a String
 impl From<TorServiceId> for String {
     fn from(id: TorServiceId) -> String {
-        id.0
+        id.0.clone()
     }
 }
 
@@ -56,7 +70,7 @@ impl std::convert::From<VerifyingKey> for TorServiceId {
 
 /// Parse a String into a service ID. Note that this does a good bit of verification that the
 /// service ID is indeed a service ID
-impl std::str::FromStr for TorServiceId {
+impl FromStr for TorServiceId {
     type Err = TorError;
 
     fn from_str(service_id: &str) -> Result<Self, Self::Err> {
@@ -83,7 +97,7 @@ impl std::str::FromStr for TorServiceId {
 impl TorServiceId {
     /// Generate a new ED25519 public key, and the corresponding TorServiceId
     pub fn generate() -> Self {
-        let signing_key = DalekSigningKey::generate(&mut OsRng);
+        let signing_key = SigningKey::generate(&mut OsRng);
         signing_key.verifying_key().into()
     }
 
@@ -121,6 +135,10 @@ impl TorServiceId {
         &self.0
     }
 
+    pub fn short_id(&self) -> &str {
+        &self.0[..10]
+    }
+
     /// Generate the corresponding onion hostname (by tacking on the ".onion" part)
     pub fn onion_hostname(&self) -> String {
         format!("{}.onion", self.0)
@@ -128,6 +146,10 @@ impl TorServiceId {
 }
 
 /// Type definition for the blob data returned by Tor
+/// The blob is the byte representation of the Ed25519 key as used by Tor.
+/// It's the byte representation of the scalar in little-endian order, concatenated
+/// with the "PRF secret" (what dalek calls the "hash prefix").
+/// In dalek parlance, it's the ExpandedSecretKey
 pub type TorBlob = [u8; 64];
 
 /// Tor Ed25519 Signing (private) key
@@ -137,16 +159,34 @@ pub type TorBlob = [u8; 64];
 /// 32-byte value, before clamping. This allows us to either use this directly when Tor requires
 /// the original blob value, or convert it easily to an actual ED25519 private key.
 #[serde_as]
-#[derive(Clone, Debug, Hash, Deserialize, Serialize, Eq, PartialEq, PartialOrd, Ord)]
+#[derive(
+    Clone,
+    Debug,
+    Hash,
+    Deserialize,
+    Serialize,
+    Eq,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
 pub struct TorEd25519SigningKey(#[serde_as(as = "Base64")] TorBlob);
 
 impl TorEd25519SigningKey {
+    /// Expanded secret key, used for signing
     fn expanded_secret_key(&self) -> ExpandedSecretKey {
-        ExpandedSecretKey::from_bytes(&self.0)
+        // Generate the ExpandedSecretKey from the blob bytes
+        ExpandedSecretKey {
+            scalar: self.scalar(),
+            hash_prefix: self.0[32..].try_into().unwrap(),
+        }
     }
 
     /// Retrieve the public verifying key from the private key
     pub fn verifying_key(&self) -> VerifyingKey {
+        // Convert that to the verifying key
         VerifyingKey::from(&self.expanded_secret_key())
     }
 
@@ -220,12 +260,13 @@ impl From<TorBlob> for TorEd25519SigningKey {
 
 /// Convert from an ED25519 signing key to our signing key.
 /// This takes the 32-byte secret key, hashes it, and stores that as the blob
-impl From<&DalekSigningKey> for TorEd25519SigningKey {
-    fn from(signing_key: &DalekSigningKey) -> Self {
-        // Hash the secret key
-        let blob = Sha512::default()
-            .chain_update(signing_key.to_bytes())
-            .finalize();
+impl From<SigningKey> for TorEd25519SigningKey {
+    fn from(signing_key: SigningKey) -> Self {
+        let expanded_secret_key = ExpandedSecretKey::from(signing_key.as_bytes());
+
+        let mut blob = [0u8; 64];
+        blob[..32].copy_from_slice(expanded_secret_key.scalar.as_bytes());
+        blob[32..].copy_from_slice(&expanded_secret_key.hash_prefix);
 
         Self(blob.into())
     }
@@ -263,10 +304,31 @@ mod tests {
     }
 
     #[test]
-    fn test_tor_ed25519v3_sign_verify() -> Result<(), anyhow::Error> {
+    fn test_tor_generated_tor_ed25519v3_sign_verify() -> Result<(), anyhow::Error> {
         let message = b"This is my very secret message";
         let base64_blob = "0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==";
         let signing_key = TorEd25519SigningKey::from_blob(base64_blob);
+        let signature = signing_key.sign(message);
+        assert!(signing_key.verify(message, &signature).is_ok());
+        Ok(())
+    }
+
+    #[test]
+    fn test_ed25519_tor_ed25519v3_expanded_keys() -> Result<(), anyhow::Error> {
+        let dalek_signing_key = SigningKey::generate(&mut OsRng);
+        let dalek_expanded_key = ExpandedSecretKey::from(dalek_signing_key.as_bytes());
+        let signing_key = TorEd25519SigningKey::from(dalek_signing_key);
+        let expanded_key = signing_key.expanded_secret_key();
+        assert_eq!(dalek_expanded_key.scalar, expanded_key.scalar);
+        assert_eq!(dalek_expanded_key.hash_prefix, expanded_key.hash_prefix);
+        Ok(())
+    }
+
+    #[test]
+    fn test_self_generated_tor_ed25519v3_sign_verify() -> Result<(), anyhow::Error> {
+        let message = b"This is my very secret message";
+        let dalek_signing_key = SigningKey::generate(&mut OsRng);
+        let signing_key = TorEd25519SigningKey::from(dalek_signing_key);
         let signature = signing_key.sign(message);
         assert!(signing_key.verify(message, &signature).is_ok());
         Ok(())
@@ -303,6 +365,17 @@ mod tests {
         assert_eq!(expected, json_out);
         let deserialized_service_id: TorServiceId = serde_json::from_str(&json_out)?;
         assert_eq!(service_id, deserialized_service_id);
+        Ok(())
+    }
+
+    #[test]
+    fn test_ed25519_signing_key_to_tor_signing_key() -> Result<(), Box<dyn std::error::Error>> {
+        let mut csprng = OsRng;
+        let signing_key: SigningKey = SigningKey::generate(&mut csprng);
+        let tor_signing_key: TorEd25519SigningKey = signing_key.clone().into();
+
+        assert_eq!(signing_key.verifying_key(), tor_signing_key.verifying_key());
+
         Ok(())
     }
 }

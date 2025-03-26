@@ -40,3 +40,4 @@ tokio = { version = "1.31.0", features = ["io-std", "net", "io-util", "macros", 
 tokio-socks = "0.5.1"
 tokio-stream = { version = "0.1.17", features = ["net"] }
 tokio-util = { version = "0.7.8", features = ["codec"] }
+zeroize = { version = "1.8.1", features = ["derive"] }
