@@ -7,7 +7,7 @@ use ed25519_dalek::{
 };
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use serde_with::{base64::Base64, serde_as};
+use serde_with::serde_as;
 use sha2::Sha512;
 use sha3::{Digest, Sha3_256};
 use std::str::FromStr;
@@ -147,66 +147,71 @@ impl TorServiceId {
 
 /// Type definition for the blob data returned by Tor
 /// The blob is the byte representation of the Ed25519 key as used by Tor.
-/// It's the byte representation of the scalar in little-endian order, concatenated
-/// with the "PRF secret" (what dalek calls the "hash prefix").
-/// In dalek parlance, it's the ExpandedSecretKey
+/// It's the output of doing a SHA-512 hash of the original secret key,
+/// followed by clamping, so it's basically the "ExpandedSecretKey", but
+/// with an unreduced scalar.
 pub type TorBlob = [u8; 64];
 
 /// Tor Ed25519 Signing (private) key
 ///
-/// Note that this is not _exactly_ the same as, say, the ed25519_dalek signing key - basically, we
-/// store the 64-byte blob data returned by the Tor API, which is the hash of the original random
-/// 32-byte value, before clamping. This allows us to either use this directly when Tor requires
-/// the original blob value, or convert it easily to an actual ED25519 private key.
+/// Note that, because of the Tor key blinding, they never transmit the
+/// secret key - what we get is, basically, the ExpandedSecretKey (see above),
+/// but with the scalar unreduced. This violates one of the invariants for
+/// ed25519_dalek, so we can't just store the ExpandedSecretKey, we also need to
+/// store the original scalar bytes from the blob so that we can recreate the blob
+/// in its original form when needed.
 #[serde_as]
-#[derive(
-    Clone,
-    Debug,
-    Hash,
-    Deserialize,
-    Serialize,
-    Eq,
-    PartialEq,
-    PartialOrd,
-    Ord,
-    Zeroize,
-    ZeroizeOnDrop,
-)]
-pub struct TorEd25519SigningKey(#[serde_as(as = "Base64")] TorBlob);
+#[derive(ZeroizeOnDrop)]
+pub struct TorEd25519SigningKey {
+    // Used to recreate the original blob
+    scalar_bytes: [u8; 32],
+
+    // Actual key data
+    expanded_secret_key: ExpandedSecretKey,
+}
 
 impl TorEd25519SigningKey {
     /// Expanded secret key, used for signing
-    fn expanded_secret_key(&self) -> ExpandedSecretKey {
-        // Generate the ExpandedSecretKey from the blob bytes
-        ExpandedSecretKey {
-            scalar: self.scalar(),
-            hash_prefix: self.0[32..].try_into().unwrap(),
-        }
+    fn expanded_secret_key(&self) -> &ExpandedSecretKey {
+        &self.expanded_secret_key
     }
 
-    /// Retrieve the public verifying key from the private key
+    /// Retrieve the public verifying key from the secret key
     pub fn verifying_key(&self) -> VerifyingKey {
-        // Convert that to the verifying key
-        VerifyingKey::from(&self.expanded_secret_key())
+        VerifyingKey::from(self.expanded_secret_key())
     }
 
     /// Return the ED25519 scalar
     pub fn scalar(&self) -> Scalar {
-        Scalar::from_bytes_mod_order(self.0[..32].try_into().unwrap())
+        self.expanded_secret_key.scalar
     }
 
     /// Create the signing key from the key blob returned by the `ADD_ONION` call
     /// (see <https://github.com/torproject/torspec/blob/main/control-spec.txt#L1862-L1864>)
-    pub fn from_blob(blob: &str) -> Self {
+    pub fn from_blob(blob: &str) -> Result<Self, TorError> {
         // Decode the blob and turn it into the Dalek ExpandedSecretKey
-        let blob = base64::decode(blob).unwrap();
-
-        Self(blob.try_into().unwrap())
+        let blob_bytes: [u8; 64] = match base64::decode(blob) {
+            Ok(bytes) => match bytes.try_into() {
+                Ok(bytes) => bytes,
+                Err(_) => Err(TorError::protocol_error(&format!(
+                    "Wrong number of bytes in blob"
+                )))?,
+            },
+            Err(error) => Err(TorError::protocol_error(&format!(
+                "Error decoding blob: {error}"
+            )))?,
+        };
+        Ok(Self::from_bytes(blob_bytes))
     }
 
     /// Convert from raw bytes to the SigningKey
     pub fn from_bytes(bytes: [u8; 64]) -> Self {
-        Self(bytes)
+        let mut scalar_bytes = [0u8; 32];
+        scalar_bytes.copy_from_slice(&bytes[..32]);
+        Self {
+            scalar_bytes,
+            expanded_secret_key: ExpandedSecretKey::from_bytes(&bytes),
+        }
     }
 
     /// Verify a message against a signature
@@ -216,12 +221,10 @@ impl TorEd25519SigningKey {
 
     /// Convert the key to a Tor blob value
     pub fn to_blob(&self) -> String {
-        base64::encode(&self.0)
-    }
-
-    /// Get the raw bytes of the signing key
-    pub fn to_bytes(&self) -> [u8; 64] {
-        self.0
+        let mut blob_bytes = [0u8; 64];
+        blob_bytes[..32].copy_from_slice(&self.scalar_bytes);
+        blob_bytes[32..].copy_from_slice(&self.expanded_secret_key.hash_prefix);
+        base64::encode(&blob_bytes)
     }
 }
 
@@ -248,13 +251,13 @@ impl std::str::FromStr for TorEd25519SigningKey {
 
 impl std::fmt::Display for TorEd25519SigningKey {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", base64::encode(&self.0))
+        write!(f, "{}", self.to_blob())
     }
 }
 
 impl From<TorBlob> for TorEd25519SigningKey {
     fn from(blob: TorBlob) -> Self {
-        Self(blob)
+        Self::from_bytes(blob)
     }
 }
 
@@ -264,11 +267,10 @@ impl From<SigningKey> for TorEd25519SigningKey {
     fn from(signing_key: SigningKey) -> Self {
         let expanded_secret_key = ExpandedSecretKey::from(signing_key.as_bytes());
 
-        let mut blob = [0u8; 64];
-        blob[..32].copy_from_slice(expanded_secret_key.scalar.as_bytes());
-        blob[32..].copy_from_slice(&expanded_secret_key.hash_prefix);
-
-        Self(blob.into())
+        Self {
+            scalar_bytes: expanded_secret_key.scalar.as_bytes().clone(),
+            expanded_secret_key,
+        }
     }
 }
 
@@ -294,7 +296,7 @@ mod tests {
     #[test]
     fn test_ed25519v3_service_id() -> Result<(), anyhow::Error> {
         let base64_blob = "0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==";
-        let signing_key = TorEd25519SigningKey::from_blob(base64_blob);
+        let signing_key = TorEd25519SigningKey::from_blob(base64_blob)?;
         let public_key = signing_key.verifying_key();
         assert_eq!(
             "vvqbbaknxi6w44t6rplzh7nmesfzw3rjujdijpqsu5xl3nhlkdscgqad",
@@ -307,7 +309,7 @@ mod tests {
     fn test_tor_generated_tor_ed25519v3_sign_verify() -> Result<(), anyhow::Error> {
         let message = b"This is my very secret message";
         let base64_blob = "0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==";
-        let signing_key = TorEd25519SigningKey::from_blob(base64_blob);
+        let signing_key = TorEd25519SigningKey::from_blob(base64_blob)?;
         let signature = signing_key.sign(message);
         assert!(signing_key.verify(message, &signature).is_ok());
         Ok(())
@@ -337,7 +339,7 @@ mod tests {
     #[test]
     fn test_to_from_blob() -> Result<(), anyhow::Error> {
         let blob_in = "0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==";
-        let signing_key = TorEd25519SigningKey::from_blob(blob_in);
+        let signing_key = TorEd25519SigningKey::from_blob(blob_in)?;
         let blob_out = signing_key.to_blob();
         assert_eq!(blob_in, blob_out);
 
@@ -345,14 +347,17 @@ mod tests {
     }
 
     #[test]
-    fn test_serialize_signing_key() -> Result<(), anyhow::Error> {
+    fn test_blob_reduced() -> Result<(), anyhow::Error> {
         let blob_in = "0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==";
-        let signing_key = TorEd25519SigningKey::from_blob(blob_in);
-        let json_out = serde_json::to_string(&signing_key)?;
-        let expected = "\"0H/jnBeWzMoU1MGNRQPnmd8JqlpTNS3UeTiDOMyPTGGXXpLd0KinCtQbcgz2fCYjbzfK3ElJ7x3zGCkB1fAtAA==\"";
-        assert_eq!(expected, json_out);
-        let deserialized_signing_key: TorEd25519SigningKey = serde_json::from_str(&json_out)?;
-        assert_eq!(signing_key, deserialized_signing_key);
+        let bytes = base64::decode(blob_in)?;
+        let scalar_bytes: [u8; 32] = bytes[..32].try_into().unwrap();
+        let scalar = Scalar::from_bytes_mod_order(scalar_bytes);
+        let output = scalar.to_bytes();
+        let scalar2 = Scalar::from_bytes_mod_order(output);
+        let output2 = scalar2.to_bytes();
+
+        assert_eq!(output, output2);
+
         Ok(())
     }
 

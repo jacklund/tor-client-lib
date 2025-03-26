@@ -321,7 +321,7 @@ impl Display for OnionAddress {
 /// details).
 /// - The signing, i.e, private, key for the onion service
 /// - The mapping from the virtual port(s) to the service port(s)
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize, ZeroizeOnDrop)]
+#[derive(ZeroizeOnDrop)]
 pub struct OnionService {
     #[zeroize(skip)]
     ports: Vec<OnionServiceMapping>,
@@ -562,7 +562,7 @@ fn parse_required_response_field<'a>(
 fn parse_add_onion_response(
     captures: &Captures<'_>,
     ports: &[OnionServiceMapping],
-    signing_key: Option<&TorEd25519SigningKey>,
+    signing_key: Option<TorEd25519SigningKey>,
 ) -> Result<OnionService, TorError> {
     let service_id =
         parse_required_response_field(captures, "service_id", "ServiceID", "ADD_ONION")?;
@@ -570,11 +570,15 @@ fn parse_add_onion_response(
     // Retrieve the key, either the one passed in or the one
     // returned from the controller
     let (returned_signing_key, verifying_key) = match signing_key {
-        Some(signing_key) => (signing_key.clone(), signing_key.verifying_key()),
+        Some(signing_key) => {
+            let verifying_key = signing_key.verifying_key();
+            (signing_key, verifying_key)
+        }
         None => match captures.name("key_type") {
             Some(_) => {
                 let signing_key =
-                    TorEd25519SigningKey::from_blob(captures.name("key_blob").unwrap().as_str());
+                    TorEd25519SigningKey::from_blob(captures.name("key_blob").unwrap().as_str())
+                        .unwrap();
                 let verifying_key = signing_key.verifying_key();
                 (signing_key, verifying_key)
             }
@@ -767,10 +771,10 @@ impl TorControlConnection {
         &mut self,
         ports: &[OnionServiceMapping],
         transient: bool,
-        signing_key: Option<&TorEd25519SigningKey>,
+        signing_key: Option<TorEd25519SigningKey>,
     ) -> Result<OnionService, TorError> {
         // Create the request string from the arguments
-        let request_string = format_key_request_string(ports, transient, signing_key);
+        let request_string = format_key_request_string(ports, transient, signing_key.as_ref());
 
         // Send command to Tor controller
         let control_response = self
