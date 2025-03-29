@@ -146,24 +146,26 @@ impl TorServiceId {
 }
 
 /// Type definition for the blob data returned by Tor
-/// The blob is the byte representation of the Ed25519 key as used by Tor.
+/// The blob is the byte representation of the Ed25519 signing key as used by Tor.
 /// It's the output of doing a SHA-512 hash of the original secret key,
-/// followed by clamping, so it's basically the "ExpandedSecretKey", but
-/// with an unreduced scalar.
+/// followed by clamping, so it's basically the "ExpandedSecretKey".
+/// This yields the scalar used to multiply the base point, and the "hash prefix"
+/// which is also used in the signature.
+///
+/// Note that the Tor implementation, unlike many (including ed25519_dalek),
+/// don't reduce the scalar modulo the group order \\( \ell \\). This doesn't
+/// really matter, though, since the group operation will be the same regardless
 pub type TorBlob = [u8; 64];
 
 /// Tor Ed25519 Signing (private) key
-///
-/// Note that, because of the Tor key blinding, they never transmit the
-/// secret key - what we get is, basically, the ExpandedSecretKey (see above),
-/// but with the scalar unreduced. This violates one of the invariants for
-/// ed25519_dalek, so we can't just store the ExpandedSecretKey, we also need to
-/// store the original scalar bytes from the blob so that we can recreate the blob
-/// in its original form when needed.
 #[serde_as]
 #[derive(ZeroizeOnDrop)]
 pub struct TorEd25519SigningKey {
     // Used to recreate the original blob
+    // Because the key returned in the blob is not reduced,
+    // to recreate the original blob (for instance, to return it to Tor)
+    // we need to hold onto the original unreduced bytes to recreate
+    // the blob
     scalar_bytes: [u8; 32],
 
     // Actual key data
@@ -250,12 +252,17 @@ impl From<TorBlob> for TorEd25519SigningKey {
 }
 
 /// Convert from an ED25519 signing key to our signing key.
-/// This takes the 32-byte secret key, hashes it, and stores that as the blob
+/// This takes the 32-byte secret key and hashes, clamps, and reduces it
+/// to the 64-byte expanded key.
 impl From<SigningKey> for TorEd25519SigningKey {
     fn from(signing_key: SigningKey) -> Self {
         let expanded_secret_key = ExpandedSecretKey::from(signing_key.as_bytes());
 
         Self {
+            // Hold onto the top 32 bytes for the blob
+            // Note that we don't really have to do that in this case, since the
+            // bytes are the same as the expanded_secret_key, but it makes
+            // the code cleaner
             scalar_bytes: expanded_secret_key.scalar.as_bytes().clone(),
             expanded_secret_key,
         }
