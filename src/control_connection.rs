@@ -317,7 +317,7 @@ impl Display for OnionAddress {
 ///
 /// Each onion service has the following:
 /// - The service ID contains all the information for the public key (see [TorServiceId] for
-/// details).
+/// - details).
 /// - The signing, i.e, private, key for the onion service
 /// - The mapping from the virtual port(s) to the service port(s)
 pub struct OnionService {

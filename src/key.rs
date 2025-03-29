@@ -195,9 +195,7 @@ impl TorEd25519SigningKey {
         let blob_bytes: [u8; 64] = match base64::decode(blob) {
             Ok(bytes) => match bytes.try_into() {
                 Ok(bytes) => bytes,
-                Err(_) => Err(TorError::protocol_error(&format!(
-                    "Wrong number of bytes in blob"
-                )))?,
+                Err(_) => Err(TorError::protocol_error("Wrong number of bytes in blob"))?,
             },
             Err(error) => Err(TorError::protocol_error(&format!(
                 "Error decoding blob: {error}"
@@ -263,7 +261,7 @@ impl From<SigningKey> for TorEd25519SigningKey {
             // Note that we don't really have to do that in this case, since the
             // bytes are the same as the expanded_secret_key, but it makes
             // the code cleaner
-            scalar_bytes: expanded_secret_key.scalar.as_bytes().clone(),
+            scalar_bytes: *expanded_secret_key.scalar.as_bytes(),
             expanded_secret_key,
         }
     }
@@ -273,7 +271,7 @@ impl From<SigningKey> for TorEd25519SigningKey {
 impl Signer<Signature> for TorEd25519SigningKey {
     fn try_sign(&self, message: &[u8]) -> Result<Signature, SignatureError> {
         Ok(raw_sign::<Sha512>(
-            &self.expanded_secret_key(),
+            self.expanded_secret_key(),
             message,
             &self.verifying_key(),
         ))
