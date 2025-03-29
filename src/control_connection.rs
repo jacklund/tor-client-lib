@@ -21,7 +21,6 @@ use tokio::{
 };
 use tokio_stream::wrappers::{TcpListenerStream, UnixListenerStream};
 use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec, LinesCodecError};
-use zeroize::ZeroizeOnDrop;
 
 /// Generalization of the [std::net::SocketAddr] for Tor communication.
 /// Clients can communicate with the Tor server either through the standard TCP connection, or
@@ -321,11 +320,8 @@ impl Display for OnionAddress {
 /// details).
 /// - The signing, i.e, private, key for the onion service
 /// - The mapping from the virtual port(s) to the service port(s)
-#[derive(ZeroizeOnDrop)]
 pub struct OnionService {
-    #[zeroize(skip)]
     ports: Vec<OnionServiceMapping>,
-    #[zeroize(skip)]
     service_id: TorServiceId,
     signing_key: TorEd25519SigningKey,
 }
@@ -400,9 +396,21 @@ impl OnionService {
         &self.signing_key
     }
 
+    // Provide a way to destructively retrieve the signing key
+    fn into_signing_key(self) -> TorEd25519SigningKey {
+        self.signing_key
+    }
+
     /// Return the list of virtual to service port mappings for this onion service
-    pub fn ports(&self) -> &Vec<OnionServiceMapping> {
-        &self.ports
+    pub fn ports(&self) -> Vec<OnionServiceMapping> {
+        self.ports.clone()
+    }
+}
+
+/// Convert an onion service to a signing key
+impl From<OnionService> for TorEd25519SigningKey {
+    fn from(onion_service: OnionService) -> Self {
+        onion_service.into_signing_key()
     }
 }
 
