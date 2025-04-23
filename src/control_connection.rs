@@ -109,6 +109,7 @@ impl FromStr for TorSocketAddr {
 }
 
 /// You can listen for data for an onion service either through TCP or a unix socket
+#[derive(Debug)]
 pub enum OnionServiceListener {
     Tcp(TcpListener),
     Unix(UnixListener),
@@ -629,6 +630,7 @@ pub struct ProtocolInfo {
 
 /// Control connection, used to send commands to and receive responses from
 /// the Tor server
+#[derive(Debug)]
 pub struct TorControlConnection {
     reader: FramedRead<ReadHalf<TcpStream>, LinesCodec>,
     writer: FramedWrite<WriteHalf<TcpStream>, LinesCodec>,
